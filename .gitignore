@@ -1,0 +1,12 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+questline/build/
+# Built app: only the release .exe is tracked
+questline/dist/*
+!questline/dist/Questline.exe
+# A shared folder pointed at questline/ itself (this laptop's setup): never commit team/progress data
+questline/questline-team.js
+questline/progress/
+questline/app/
+questline/Open Questline.html

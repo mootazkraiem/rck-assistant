@@ -1,0 +1,365 @@
+{
+  "_about": "SYNTHETIC data for RCK assistant development. Fictional systems, codes and procedures. Contains no company data. Status 'approved' = trusted knowledge; every other status must never reach the assistant.",
+  "tickets": [
+    {
+      "id": "T-1001", "type": "problem_solution", "status": "approved", "language": "en",
+      "title": "Release package approval blocked with VAL-217",
+      "applications": ["PDM", "Validation Tool", "Workflow Manager"],
+      "error_code": "VAL-217",
+      "problem": "Approving a release package fails with error VAL-217 and the approval button stays disabled.",
+      "root_cause": "Dependency validation was never executed for the package, so one required artifact is missing from the package manifest.",
+      "solution": "Run Dependency Validation in the Validation Tool, add the missing artifact it reports, then resubmit the release package for approval.",
+      "steps": ["Open the release package in PDM and note the package number.", "In the Validation Tool, run Dependency Validation for that package.", "Add the missing artifact listed in the validation report to the package.", "Resubmit the release package for approval in Workflow Manager."]
+    },
+    {
+      "id": "T-1002", "type": "problem_solution", "status": "approved", "language": "en",
+      "title": "Engineer cannot approve release: WFM-403 not authorized",
+      "applications": ["Workflow Manager"],
+      "error_code": "WFM-403",
+      "problem": "An engineer who holds the approver role gets WFM-403 'not authorized' when approving a release.",
+      "root_cause": "Group membership changes reach the Workflow Manager permission cache only at the next scheduled sync, which runs every 15 minutes.",
+      "solution": "Wait for the next sync (at most 15 minutes) or force it: Admin > Cache > Refresh permissions.",
+      "steps": ["Confirm the user is in the approver group.", "Open Admin > Cache in Workflow Manager.", "Click Refresh permissions and ask the user to retry."]
+    },
+    {
+      "id": "T-1003", "type": "procedure", "status": "approved", "language": "en",
+      "title": "Create a hotfix baseline in PDM",
+      "applications": ["PDM"],
+      "purpose": "Create an isolated baseline for an urgent hotfix without touching the main release line.",
+      "prerequisites": "Role 'Release Manager' in PDM; the defect ticket number.",
+      "steps": ["Open the production baseline in PDM.", "Choose Baseline > Derive and use the name prefix HF- followed by the defect number.", "Add only the changed parts to the new baseline.", "Click Freeze baseline once validation passes.", "Request approval from the Release Manager on duty."],
+      "warnings": "Never derive a hotfix baseline from an unfrozen baseline."
+    },
+    {
+      "id": "T-1004", "type": "information", "status": "approved", "language": "en",
+      "title": "Upload limits in CAD Data Exchange",
+      "applications": ["CAD Data Exchange"],
+      "topic": "File size limits",
+      "description": "CAD Data Exchange accepts single uploads of up to 2 GB. Larger assemblies must be split into volumes with the command-line tool 'cdx split' before uploading; the receiving side reassembles them automatically."
+    },
+    {
+      "id": "T-1005", "type": "problem_solution", "status": "approved", "language": "en",
+      "title": "Nightly build agents run out of disk during packaging",
+      "applications": ["Build Agents"],
+      "error_code": "",
+      "problem": "Nightly packaging jobs fail with 'no space left on device' on the build agents.",
+      "root_cause": "The artifact cache on the agents was never purged, so old packages accumulated.",
+      "solution": "Set the artifact cache retention to 3 days and schedule the purge-cache job to run before packaging.",
+      "steps": ["Open the agent configuration.", "Set cache retention to 3 days.", "Schedule the purge-cache job at 01:00, before the nightly packaging starts."]
+    },
+    {
+      "id": "T-1006", "type": "information", "status": "approved", "language": "en",
+      "title": "Production release windows",
+      "applications": ["Release Portal"],
+      "topic": "Release scheduling",
+      "description": "Production releases may only be deployed in the reserved windows on Tuesday and Thursday from 18:00 to 20:00 CET. Outside these windows only emergency hotfixes approved by the Release Manager on duty are allowed."
+    },
+    {
+      "id": "T-1007", "type": "problem_solution", "status": "approved", "language": "de",
+      "title": "Exportjob im Release Portal hängt bei 'Wird verarbeitet' (RP-509)",
+      "applications": ["Release Portal"],
+      "error_code": "RP-509",
+      "problem": "Ein Exportjob bleibt dauerhaft im Status 'Wird verarbeitet' stehen; nach 30 Minuten erscheint RP-509.",
+      "root_cause": "Der Job-Worker wurde während des Exports neu gestartet und hat die Sperre auf den Job nicht freigegeben.",
+      "solution": "Den Job unter Administration > Jobs abbrechen, die Jobsperre freigeben und den Export neu starten.",
+      "steps": ["Release Portal > Administration > Jobs öffnen.", "Den hängenden Job auswählen und abbrechen.", "Auf 'Jobsperre freigeben' klicken.", "Den Export neu starten."]
+    },
+    {
+      "id": "T-1008", "type": "procedure", "status": "approved", "language": "de",
+      "title": "Vier-Augen-Prinzip für Produktivfreigaben im Workflow Manager einstellen",
+      "applications": ["Workflow Manager"],
+      "purpose": "Sicherstellen, dass jede Produktivfreigabe von zwei Personen freigegeben wird.",
+      "prerequisites": "Rolle 'Workflow-Administrator'.",
+      "steps": ["Workflow Manager > Administration > Freigabe-Richtlinien öffnen.", "Die Richtlinie 'Produktivfreigabe' auswählen.", "Den Wert 'Mindestanzahl Freigeber' auf 2 setzen.", "Speichern."],
+      "warnings": "Die Änderung gilt nur für neu gestartete Workflows; laufende Workflows behalten ihre bisherige Einstellung."
+    },
+    {
+      "id": "T-1009", "type": "problem_solution", "status": "approved", "language": "en",
+      "title": "VAL-112: schema version mismatch in Validation Tool",
+      "applications": ["Validation Tool"],
+      "error_code": "VAL-112",
+      "problem": "Validation stops immediately with VAL-112 'schema version mismatch'.",
+      "root_cause": "The validation rule set still targets an older data schema than the package being validated.",
+      "solution": "Update the validation rule set to schema 4.2 and run the validation again.",
+      "steps": ["Open Rules > Rule sets in the Validation Tool.", "Select the active rule set and choose Update schema.", "Pick schema 4.2 and save.", "Re-run the validation."]
+    },
+    {
+      "id": "T-1010", "type": "procedure", "status": "approved", "language": "de",
+      "title": "Vorbereitung einer Datenmigration in PDM",
+      "applications": ["PDM"],
+      "purpose": "Datenverlust und inkonsistente Stände bei einer PDM-Datenmigration vermeiden.",
+      "prerequisites": "Wartungsfenster ist angekündigt; Rolle 'PDM-Administrator'.",
+      "steps": ["Vollständiges Backup der PDM-Datenbank erstellen.", "Eine Schreibsperre für alle betroffenen Projekte setzen.", "Das Prüfskript pdm-precheck ausführen und alle Fehler beheben.", "Erst danach die Migration starten."],
+      "warnings": "Ohne Schreibsperre können während der Migration Änderungen verloren gehen."
+    },
+    {
+      "id": "T-1011", "type": "problem_solution", "status": "approved", "language": "en",
+      "title": "Release Portal login fails after a password change",
+      "applications": ["Release Portal"],
+      "error_code": "",
+      "problem": "After changing their password, users cannot sign in to the Release Portal for a while.",
+      "root_cause": "The portal keeps the old single sign-on session until the directory synchronisation completes.",
+      "solution": "Sign out of all open sessions, wait 10 minutes for the directory synchronisation, then sign in again.",
+      "steps": ["Sign out of every open Release Portal session.", "Wait 10 minutes.", "Sign in with the new password."]
+    },
+    {
+      "id": "T-1012", "type": "procedure", "status": "approved", "language": "en",
+      "title": "Export a bill of materials (BOM) from PDM as CSV",
+      "applications": ["PDM"],
+      "purpose": "Produce a BOM file that other tools can import.",
+      "prerequisites": "Read access to the product in PDM.",
+      "steps": ["Open the product in PDM.", "Go to Product > Reports > BOM Export.", "Select CSV as the format and UTF-8 as the encoding.", "Click Export and save the file."],
+      "warnings": "Other encodings break special characters in part names."
+    },
+    {
+      "id": "T-1013", "type": "problem_solution", "status": "approved", "language": "en",
+      "title": "VAL-305: duplicate part number during validation",
+      "applications": ["Validation Tool", "PDM"],
+      "error_code": "VAL-305",
+      "problem": "Validation fails with VAL-305 'duplicate part number'.",
+      "root_cause": "Two parts in the package share the same part number, usually after a copy-and-modify operation.",
+      "solution": "Run the dedupe-parts check to list the duplicates, give the copied part a new number, then validate again.",
+      "steps": ["Run dedupe-parts on the package.", "Renumber the copied part following the part-number convention.", "Re-run the validation."]
+    },
+    {
+      "id": "T-1014", "type": "information", "status": "approved", "language": "de",
+      "title": "Aufbewahrung der Audit-Protokolle",
+      "applications": ["Release Portal", "Workflow Manager"],
+      "topic": "Audit-Protokolle",
+      "description": "Audit-Protokolle des Release Portals und des Workflow Managers werden 365 Tage aufbewahrt und danach automatisch gelöscht. Für längere Nachweise müssen sie vorher exportiert werden."
+    },
+    {
+      "id": "T-1015", "type": "problem_solution", "status": "approved", "language": "en",
+      "title": "VAL-271: rule set file cannot be loaded",
+      "applications": ["Validation Tool"],
+      "error_code": "VAL-271",
+      "problem": "The Validation Tool reports VAL-271 when opening a rule set file.",
+      "root_cause": "The rule set file was saved with a newer editor version.",
+      "solution": "Open the file with the current rule editor and save it again in the supported format.",
+      "steps": ["Open the rule set in the current rule editor.", "Save it again.", "Reload it in the Validation Tool."]
+    },
+    {
+      "id": "T-1016", "type": "problem_solution", "status": "review", "language": "en",
+      "title": "Build agent disk full during nightly packaging",
+      "applications": ["Build Agents"],
+      "error_code": "",
+      "problem": "Nightly packaging fails because the agent disk is full.",
+      "root_cause": "Unknown.",
+      "solution": "Log on to the agent and delete the whole workspace folder manually.",
+      "steps": ["Log on to the agent.", "Delete the workspace folder."]
+    },
+    {
+      "id": "T-1017", "type": "procedure", "status": "approved", "language": "en",
+      "title": "Set up a new Windows build agent",
+      "applications": ["Build Agents"],
+      "purpose": "Add a Windows machine to the build agent pool.",
+      "prerequisites": "Windows Server machine with local administrator rights.",
+      "steps": ["Install the agent package from the internal software portal.", "Register the agent with the pool name 'release-win'.", "Set the artifact cache retention to 3 days.", "Run a test packaging job."],
+      "warnings": "This procedure covers Windows agents only."
+    },
+    {
+      "id": "T-1018", "type": "procedure", "status": "approved", "language": "en",
+      "title": "Roll back a PDM baseline to the previous frozen state",
+      "applications": ["PDM"],
+      "purpose": "Restore the previous frozen baseline after a faulty baseline update in PDM.",
+      "prerequisites": "Role 'Release Manager' in PDM.",
+      "steps": ["Open the baseline history in PDM.", "Select the previous frozen baseline.", "Choose Restore as current.", "Notify the project team."],
+      "warnings": "This only affects PDM baselines; it does not undo deployments made from them."
+    },
+    {
+      "id": "T-1019", "type": "information", "status": "approved", "language": "en",
+      "title": "Supported formats in CAD Data Exchange",
+      "applications": ["CAD Data Exchange"],
+      "topic": "File formats",
+      "description": "CAD Data Exchange supports STEP AP242 and JT 10 for geometry, and PDF for drawings. Native CAD formats are converted on upload."
+    },
+    {
+      "id": "T-1020", "type": "problem_solution", "status": "approved", "language": "de",
+      "title": "Benachrichtigungen aus dem Workflow Manager kommen nicht an",
+      "applications": ["Workflow Manager"],
+      "error_code": "",
+      "problem": "Freigeber erhalten keine E-Mail-Benachrichtigungen über neue Freigabeaufgaben.",
+      "root_cause": "Die Benachrichtigungsregel war nach einem Update deaktiviert.",
+      "solution": "Unter Administration > Benachrichtigungen die Regel 'Neue Freigabeaufgabe' wieder aktivieren.",
+      "steps": ["Administration > Benachrichtigungen öffnen.", "Regel 'Neue Freigabeaufgabe' aktivieren.", "Mit einer Testaufgabe prüfen."]
+    },
+    {
+      "id": "T-1021", "type": "information", "status": "approved", "language": "de",
+      "title": "Release-Kalender: Feiertagssperre",
+      "applications": ["Release Portal"],
+      "topic": "Release-Planung",
+      "description": "Vom 20. Dezember bis 6. Januar gilt eine Feiertagssperre: In diesem Zeitraum werden keine regulären Produktivreleases ausgeliefert."
+    },
+    {
+      "id": "T-1022", "type": "problem_solution", "status": "approved", "language": "en",
+      "title": "Validation Tool very slow on large assemblies",
+      "applications": ["Validation Tool"],
+      "error_code": "",
+      "problem": "Validating assemblies with more than 5,000 parts takes over an hour.",
+      "root_cause": "The full geometry check runs for every part, including unchanged ones.",
+      "solution": "Enable incremental validation so that only changed parts are checked.",
+      "steps": ["Open Settings > Performance.", "Enable Incremental validation.", "Re-run the validation."]
+    },
+    {
+      "id": "T-1023", "type": "procedure", "status": "approved", "language": "en",
+      "title": "Request access to PDM for a new engineer",
+      "applications": ["PDM"],
+      "purpose": "Give a new engineer read access to PDM projects.",
+      "prerequisites": "The engineer has a valid company account.",
+      "steps": ["Open an access request in the service portal.", "Choose the PDM project and the role 'Reader'.", "Have the project lead approve the request."],
+      "warnings": "Write access needs a separate request."
+    },
+    {
+      "id": "T-1024", "type": "problem_solution", "status": "approved", "language": "en",
+      "title": "Login loop in Workflow Manager",
+      "applications": ["Workflow Manager"],
+      "error_code": "",
+      "problem": "Workflow Manager keeps returning to the sign-in page after a successful login.",
+      "root_cause": "Third-party cookies are blocked for the sign-in domain.",
+      "solution": "Allow cookies for the Workflow Manager sign-in domain in the browser settings.",
+      "steps": ["Open the browser cookie settings.", "Allow cookies for the sign-in domain.", "Sign in again."]
+    },
+    {
+      "id": "T-1025", "type": "information", "status": "approved", "language": "en",
+      "title": "Part number convention",
+      "applications": ["PDM"],
+      "topic": "Naming",
+      "description": "Part numbers have the form PN-<project code>-<6 digits>. Copied parts must always receive a new number before validation."
+    },
+    {
+      "id": "T-1026", "type": "problem_solution", "status": "approved", "language": "de",
+      "title": "BOM-Export auf Netzlaufwerk schlägt bei langen Pfaden fehl",
+      "applications": ["PDM"],
+      "error_code": "",
+      "problem": "Der BOM-Export bricht beim Speichern auf einem Netzlaufwerk ab.",
+      "root_cause": "Der Zielpfad ist länger als 260 Zeichen.",
+      "solution": "Einen kürzeren Zielordner wählen, z. B. direkt im Wurzelverzeichnis des Laufwerks.",
+      "steps": ["Kürzeren Zielordner anlegen.", "Export erneut starten."]
+    },
+    {
+      "id": "T-1027", "type": "problem_solution", "status": "approved", "language": "en",
+      "title": "Audit log export from Release Portal times out",
+      "applications": ["Release Portal"],
+      "error_code": "",
+      "problem": "Exporting the audit log for a whole year times out.",
+      "root_cause": "The export runs in a single request with a 60-second limit.",
+      "solution": "Export the audit log month by month.",
+      "steps": ["Set the date filter to one month.", "Export.", "Repeat for each month."]
+    },
+    {
+      "id": "T-1028", "type": "problem_solution", "status": "rejected", "language": "en",
+      "title": "Quick fix for VAL-217",
+      "applications": ["Validation Tool"],
+      "error_code": "VAL-217",
+      "problem": "Approval blocked with VAL-217.",
+      "root_cause": "Not analysed.",
+      "solution": "Disable dependency validation in the settings so the approval goes through.",
+      "steps": ["Open Settings.", "Disable dependency validation."]
+    },
+    {
+      "id": "T-1029", "type": "procedure", "status": "in_progress", "language": "de",
+      "title": "Hotfix-Freigabe außerhalb des Release-Fensters beantragen",
+      "applications": ["Release Portal"],
+      "purpose": "Notfall-Hotfix außerhalb der regulären Fenster ausliefern.",
+      "prerequisites": "Entwurf.",
+      "steps": ["Entwurf: Ablauf wird noch abgestimmt."],
+      "warnings": ""
+    },
+    {
+      "id": "T-1030", "type": "information", "status": "review", "language": "en",
+      "title": "Release Portal API rate limit",
+      "applications": ["Release Portal"],
+      "topic": "API",
+      "description": "The Release Portal API accepts at most 120 requests per minute per user; further requests receive HTTP 429."
+    },
+    {
+      "id": "T-1031", "type": "problem_solution", "status": "approved", "language": "en",
+      "title": "Release Portal export times out for very large packages",
+      "applications": ["Release Portal"],
+      "error_code": "RP-504",
+      "problem": "Exporting packages larger than 10 GB ends with RP-504 'gateway timeout'.",
+      "root_cause": "Large exports exceed the synchronous request limit.",
+      "solution": "Use the asynchronous export option and download the file from Notifications when it is ready.",
+      "steps": ["Choose Export > Asynchronous.", "Wait for the notification.", "Download the file from Notifications."]
+    },
+    {
+      "id": "T-1032", "type": "information", "status": "approved", "language": "de",
+      "title": "Benennung der Regelsätze im Validation Tool",
+      "applications": ["Validation Tool"],
+      "topic": "Regelsätze",
+      "description": "Regelsätze werden nach dem Schema RS-<Bereich>-<laufende Nummer> benannt, z. B. RS-KAROSSERIE-012. Der aktive Regelsatz ist in der Liste fett markiert."
+    },
+    {
+      "id": "T-1033", "type": "problem_solution", "status": "approved", "language": "en",
+      "title": "Workflow stuck at approval step with no approver",
+      "applications": ["Workflow Manager"],
+      "error_code": "",
+      "problem": "A workflow stays at the approval step and no approver is shown.",
+      "root_cause": "The approver group mapping was removed during a directory clean-up.",
+      "solution": "Re-map the approval step to the correct approver group and restart the step.",
+      "steps": ["Open the workflow definition.", "Re-map the approval step to the approver group.", "Restart the step."]
+    },
+    {
+      "id": "T-1034", "type": "procedure", "status": "approved", "language": "en",
+      "title": "Weekend change freeze",
+      "applications": ["Release Portal"],
+      "purpose": "Protect production stability over the weekend.",
+      "prerequisites": "None.",
+      "steps": ["The change freeze starts every Friday at 12:00.", "It ends on Monday at 08:00.", "During the freeze only incident fixes are deployed."],
+      "warnings": "Planned releases must be moved to the next release window."
+    },
+    {
+      "id": "T-1035", "type": "problem_solution", "status": "approved", "language": "en",
+      "title": "Baseline not found when starting a release",
+      "applications": ["PDM"],
+      "error_code": "PDM-404",
+      "problem": "The release job fails with PDM-404 'baseline not found' although the baseline is visible in PDM.",
+      "root_cause": "The release job points to a different work context than the one holding the baseline.",
+      "solution": "Point the release job to the correct work context and start it again.",
+      "steps": ["Check the work context of the baseline.", "Update the release job's work context.", "Restart the release job."]
+    },
+    {
+      "id": "T-1036", "type": "information", "status": "approved", "language": "en",
+      "title": "What is a release package?",
+      "applications": ["PDM", "Release Portal"],
+      "topic": "Glossary",
+      "description": "A release package bundles all parts, drawings and documents that are released together. It is created in PDM, validated in the Validation Tool and deployed through the Release Portal."
+    },
+    {
+      "id": "T-1037", "type": "problem_solution", "status": "cancelled", "language": "de",
+      "title": "Lizenzserver nicht erreichbar",
+      "applications": ["CAD Data Exchange"],
+      "error_code": "",
+      "problem": "CAD Data Exchange meldet, dass der Lizenzserver nicht erreichbar ist.",
+      "root_cause": "Doppelt erfasst.",
+      "solution": "Siehe anderes Ticket.",
+      "steps": []
+    },
+    {
+      "id": "T-1038", "type": "problem_solution", "status": "review", "language": "en",
+      "title": "JT conversion crashes on upload",
+      "applications": ["CAD Data Exchange"],
+      "error_code": "CDX-500",
+      "problem": "Uploading certain JT files crashes the conversion service.",
+      "root_cause": "Under investigation.",
+      "solution": "Not yet known.",
+      "steps": []
+    },
+    {
+      "id": "T-1039", "type": "procedure", "status": "approved", "language": "en",
+      "title": "Request a change to a validation rule",
+      "applications": ["Validation Tool"],
+      "purpose": "Get a validation rule changed or added.",
+      "prerequisites": "A concrete example package where the rule fails.",
+      "steps": ["Open a rule change request in the service portal.", "Attach the example package and the validation report.", "The rule owners review requests every Wednesday."],
+      "warnings": "Do not edit the active rule set directly."
+    },
+    {
+      "id": "T-1040", "type": "information", "status": "approved", "language": "en",
+      "title": "Escalation levels for release incidents",
+      "applications": ["Release Portal"],
+      "topic": "Support",
+      "description": "Release incidents are escalated in three levels: L1 service desk, L2 application support, L3 product engineering. Production-blocking incidents go directly to L2."
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Questline</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f3a5f'/%3E%3Ccircle cx='15' cy='15' r='7.5' stroke='white' stroke-width='3' fill='none'/%3E%3Cpath d='M19 19l5.5 5.5' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#overview" aria-label="Overview">
+      <span class="brand-mark" aria-hidden="true">Q</span>
+      <span class="brand-text"><b>Questline</b><small>RCK AI Assistant</small></span>
+    </a>
+    <div class="search-wrap">
+      <input id="globalSearch" type="search" placeholder="Search quests, ADRs, docs…  ( / )" autocomplete="off" aria-label="Search">
+      <div id="searchResults" class="search-results" hidden></div>
+    </div>
+    <div class="top-actions">
+      <span id="saveState" class="save-state" title="Progress is saved in this browser">Saved</span>
+      <button id="themeToggle" class="icon-btn" type="button" aria-label="Toggle theme" title="Toggle light/dark">◐</button>
+    </div>
+  </header>
+  <div class="layout">
+    <nav class="sidebar" id="nav" aria-label="Sections">
+      <a href="#overview" data-nav="overview"><span>◎</span>Overview</a>
+      <a href="#quests" data-nav="quests"><span>☰</span>Quests</a>
+      <a href="#graph" data-nav="graph"><span>⇢</span>Execution order</a>
+      <a href="#adrs" data-nav="adrs"><span>◆</span>ADRs</a>
+      <a href="#docs" data-nav="docs"><span>❑</span>Docs</a>
+      <a href="#facts" data-nav="facts"><span>✓</span>Facts &amp; assumptions</a>
+      <a href="#backup" data-nav="backup"><span>⤓</span>Backup &amp; export</a>
+    </nav>
+    <main id="app" tabindex="-1"></main>
+  </div>
+  <div id="modal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <h3 id="modalTitle"></h3>
+      <div id="modalBody"></div>
+      <div id="modalActions" class="modal-actions"></div>
+    </div>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <noscript>This dashboard needs JavaScript enabled.</noscript>
+
+  <!-- Data first (order matters for quests), then logic, then UI; sync.js picks the storage mode and starts the UI. -->
+  <script src="data/project.js"></script>
+  <script src="data/adrs.js"></script>
+  <script src="data/quests-p0-p2.js"></script>
+  <script src="data/quests-p3-p5.js"></script>
+  <script src="data/quests-p6-p9.js"></script>
+  <script src="data/docs.js"></script>
+  <script src="js/logic.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/sync.js"></script>
+</body>
+</html>
