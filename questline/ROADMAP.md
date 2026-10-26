@@ -1,6 +1,6 @@
 # RCK AI Assistant: Roadmap
 
-_Generated from Questline on 2026-10-25. Source of truth: questline/data/*.js plus your saved progress._
+_Generated from Questline on 2026-10-26. Source of truth: questline/data/*.js plus your saved progress._
 
 ## Mission
 Give RCK engineers fast, cited answers from approved engineering knowledge, serving reviewed answers from a database first and calling a local model only when needed.
@@ -56,7 +56,8 @@ Q0.1 → Q1.3 → Q1.4 → Q1.5 → Q1.10 → Q2.1 → Q2.3 → Q2.4 → Q2.5 �
 - R2 [high] Cache serves a similar but different question: Critical-term guard + threshold calibrated to zero false matches on a labelled near-miss set (Q4.2, Q4.5).
 - R3 [medium] Synthetic data overstates quality: Treat results as relative (4B vs 9B); re-evaluate on authorized real questions after P7.
 - R4 [medium] Stored answers go stale after ticket edits: Store cited ticket hashes; mark entries stale on change or un-approval (Q3.3, Q9.2).
-- R5 [medium] Latest RCK schema and auth unknown: Integration only through adapters, designed after the read-only audit of the latest source (Q7.1).
+- R5 [medium] Latest RCK JSON layout and auth unknown: Integration only through adapters, designed after the read-only audit of the latest source and its shared JSON folder (Q7.1).
+- R9 [medium] Databases on a network share: Keep answers.db on local disk of the machine that runs the assistant; read RCK JSON read-only with retry on parse errors (Q7.2, Q7.3).
 - R6 [low] Disk space (17 GB free): Check before download; removing llama3.1:8b (4.9 GB) only with your approval (Q0.5).
 - R7 [medium] Qwen thinking mode breaks output contract or latency: Benchmark with thinking disabled; validate the flag in Q1.8; optional thinking-on run documented separately.
 - R8 [low] Limited Claude Code usage: Small quests with explicit file scope and a mandatory stop after completion.
@@ -72,6 +73,7 @@ Q0.1 → Q1.3 → Q1.4 → Q1.5 → Q1.10 → Q2.1 → Q2.3 → Q2.4 → Q2.5 �
 - F8: The local RCK copy (C:\Users\benkr\Projects\RBC) has 52 passing tests and is NOT the latest company version. (source: pytest; user statement)
 - F9 (reported): Reported by you, not verified here: the latest RCK on the company PC includes Engineering Cases and 73 + 50 tests. (source: user statement)
 - F10 (reported): Reported in an earlier session, re-verify in Q0.2: Ryzen 7 7435HS CPU, ~24 GB RAM. (source: earlier session)
+- F11 (reported): Reported by you, not verified here: the latest RCK stores its data as JSON files in a shared network folder (not SQLite). (source: user statement)
 
 ## Assumptions to verify
 - A1 [unverified] "Qwen 4B / 9B" means the Qwen3.5 4B and 9B models, available in Ollama as qwen3.5:4b and qwen3.5:9b. (verify in Q0.4)
@@ -81,19 +83,19 @@ Q0.1 → Q1.3 → Q1.4 → Q1.5 → Q1.10 → Q2.1 → Q2.3 → Q2.4 → Q2.5 �
 - A5 [unverified] Both models handle EN, DE and RO adequately for short cited answers. (verify in Q2.5)
 - A6 [unverified] Lexical matching plus a critical-term guard is enough for a reliable v1 matcher (no embeddings). (verify in Q4.5)
 - A7 [unverified] Serving answers only in the question's language is acceptable for v1. (verify in Q4.7)
-- A8 [unverified] The latest RCK stores tickets/cases in SQLite with an explicit approval status. (verify in Q7.1)
-- A9 [unverified] Ticket edits are detectable (update timestamp or content), enabling staleness checks. (verify in Q7.2)
+- A8 [unverified] Each RCK ticket/case in the shared JSON folder carries an explicit approval status field (replaces the earlier SQLite assumption, see F11). (verify in Q7.1)
+- A9 [unverified] Ticket edits are detectable from the JSON files (an update field, file modified time, or content hash), enabling staleness checks. (verify in Q7.2)
 - A10 [unverified] A future company GPU server will expose an Ollama or OpenAI-compatible HTTP API. (verify in Q8.1)
 - A11 [unverified] Synthetic questions approximate real user questions well enough for model selection. (verify in Q9.6)
 
 ## Unresolved decisions
 - AI-ADR-02 Candidate models: Qwen 4B versus Qwen 9B: Exact model generation and Ollama tags (assumed qwen3.5:4b / qwen3.5:9b).; Quantization available for both (assumed Q4_K_M).; License terms acceptable for company use.
 - AI-ADR-03 Model evaluation methodology: Also run with thinking on as a separate configuration?; Final question count: 20 or 40?
-- AI-ADR-05 Answer database architecture: Final home after integration: a separate file, or tables in the RCK database?
+- AI-ADR-05 Answer database architecture: Which machine runs the assistant and holds answers.db, given RCK's data lives in JSON on a network share?; How validated answers reach other machines (export, or a single assistant host).
 - AI-ADR-06 Retrieval-first answering versus model inference: The default fallback policy for production (model vs queue).
 - AI-ADR-07 Matching strategy and confidence thresholds: How the score is normalized (BM25 rank, token overlap, or both).; The threshold value (from Q4.5).; Whether multilingual embeddings are needed (decided by the measured miss rate).
 - AI-ADR-10 Standalone demo: The audience and the date of the demo.
-- AI-ADR-11 RCK integration: The ticket/case schema and the approval field.; The auth and role model.; Where answers.db lives.; How ticket updates are tracked.; The deployment model of the RCK server.
+- AI-ADR-11 RCK integration: The JSON folder layout, file naming and ticket/case fields, including the approval field.; How RCK writes the files (atomic replace or in-place) and whether several clients write concurrently.; The auth and role model.; Which machine runs the assistant and holds answers.db.; How ticket updates are tracked (update field or file modified time).
 - AI-ADR-12 GPU deployment: The provider and region.; The billing rules (hourly, idle, minimum).; The VRAM and concurrency targets.; Whether the endpoint is Ollama or vLLM.
 - AI-ADR-13 Security and access control: The RCK role model (from Q7.1).
 - AI-ADR-14 Logging, monitoring and privacy: The company retention policy for user questions.
@@ -739,13 +741,14 @@ Audit the latest RCK source and integrate through adapters, behind RCK auth.
 Status: Waiting on deps · Priority P1 · 3 h · AI Architect · Wave 1
 Depends on: Q0.1 · ADRs: AI-ADR-11, AI-ADR-13 · External: E3: access to the latest RCK source on the company PC
 
-**Objective:** RCK_AUDIT.md, kept on the company PC; only the schema-level summary is shared. It records:
+**Objective:** RCK_AUDIT.md, kept on the company PC; only the structure-level summary is shared. It records:
 - The project structure.
-- The ticket/case tables and columns, quoted verbatim from code or migrations.
-- The approval states.
-- The auth and roles (HMAC session, reviewer-like roles).
-- How the api.py bridge works.
-- How ticket updates are tracked.
+- **The shared JSON folder:** its path pattern, folder layout and file naming (one file per ticket/case, or collections).
+- **The JSON fields** of tickets/cases, quoted verbatim from the code that reads and writes them (no real file contents).
+- The approval states and the field that holds them.
+- **How RCK writes the files:** atomic replace or in-place, locking, who writes concurrently.
+- How ticket updates are tracked (an update field, modified time).
+- The auth and roles, and how the api.py bridge works.
 - The baseline test results (73 + 50).
 
 **Acceptance:**
@@ -757,11 +760,12 @@ Status: Waiting on deps · Priority P1 · 2 h · AI Architect · Wave 7
 Depends on: Q7.1, Q4.7 · ADRs: AI-ADR-11, AI-ADR-05, AI-ADR-13
 
 **Objective:** docs/INTEGRATION_DESIGN.md:
-- The field mapping from RCK to Ticket.
+- The field mapping from RCK JSON to Ticket.
 - The approval mapping.
+- **Read-only access** to the shared JSON folder, with retry on partial or locked files.
 - The API contract: ask, review and ticket endpoints.
 - The role checks.
-- Where answers.db lives.
+- **Where answers.db lives:** local disk of the machine running the assistant, never the network share (R9).
 - The feature flag.
 - The test plan.
 
@@ -771,15 +775,16 @@ AI-ADR-11 is set to accepted.
 - Every mapping references the audit
 - AI-ADR-11 accepted
 
-### Q7.3 RckTicketSource adapter
+### Q7.3 RckTicketSource adapter (shared JSON folder)
 Status: Waiting on deps · Priority P1 · 3 h · Software Engineer · Wave 8
 Depends on: Q7.2 · ADRs: AI-ADR-04, AI-ADR-11
 
-**Objective:** assistant/sources_rck.py RckTicketSource(db_path).load_approved_tickets(), with the approval filter in SQL. It is tested against a test database built from the real schema DDL plus synthetic rows.
+**Objective:** assistant/sources_rck.py: RckTicketSource(folder).load_approved_tickets() reads the RCK JSON files **read-only**, keeps approved tickets only, and maps the audited fields to Ticket. It retries a file that fails to parse (it may be mid-write) and reports files it cannot read. It is tested against a temporary folder of synthetic JSON files that follow the audited layout.
 
 **Acceptance:**
 - The tests pass
-- No unapproved rows returned
+- No unapproved tickets returned
+- The RCK folder is never written to
 
 ### Q7.4 Assistant API inside the RCK server
 Status: Waiting on deps · Priority P1 · 4 h · Software Engineer · Wave 15
@@ -880,7 +885,7 @@ Depends on: Q6.2, Q3.2 · ADRs: AI-ADR-16
 Status: Waiting on deps · Priority P2 · 2 h · Database Architect · Wave 9
 Depends on: Q3.3, Q7.3 · ADRs: AI-ADR-16, AI-ADR-04
 
-**Objective:** A sweep at server startup and on a schedule (configurable interval) using RckTicketSource, reporting the stale counts and queueing regeneration.
+**Objective:** A sweep at server startup and on a schedule (configurable interval) using RckTicketSource, reporting the stale counts and queueing regeneration. File modified times skip unchanged JSON files; content hashes decide staleness.
 
 **Acceptance:**
 - Edited tickets make their entries stale within one interval

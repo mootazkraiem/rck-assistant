@@ -87,20 +87,20 @@
       context: "Generated answers must be stored with full provenance, reviewed before use, and reused without calling the model.",
       decision: "A separate SQLite database (answers.db, WAL mode, foreign keys on) with these tables:\n- qa_entry: the answer, its status and provenance.\n- qa_variant: question phrasings, with an FTS5 index.\n- qa_source: cited tickets and their hashes.\n- qa_review_event: the audit trail.\n- match_log: every ask.\n\nThe schema is versioned through a schema_version table.",
       alternatives: [
-        ["Tables inside the RCK database", "The latest schema is unknown; coupling it now is premature."],
+        ["Store answers inside RCK's shared JSON folder", "The latest RCK keeps its data as JSON on a network share (F11); mixing assistant data in couples the two, and SQLite must not live on a network share (R9)."],
         ["A vector database", "Unnecessary complexity for v1 (AI-ADR-07)."],
         ["JSON files", "No transactions or constraints, and weak concurrency."]
       ],
-      reasons: ["SQLite is already the RCK stack.", "No new service to run.", "Easy to snapshot and roll back (AI-ADR-17)."],
-      consequences: ["Migration into RCK may be decided later (AI-ADR-11)."],
+      reasons: ["SQLite ships with Python: no new service to run.", "Transactions and FTS5 for matching.", "Easy to snapshot and roll back (AI-ADR-17)."],
+      consequences: ["answers.db must stay on local disk of the machine that runs the assistant, not on a network share (R9).", "Sharing validated answers between machines needs a sync or export step (decided in Q7.2)."],
       security: "Stored locally. When integrated, only reviewers can change status.",
       performance: "Lookups in milliseconds for thousands of entries.",
       dependencies: [],
       related: ["AI-ADR-06", "AI-ADR-07", "AI-ADR-16", "AI-ADR-17"],
       quests: ["Q3.1", "Q3.2", "Q3.3", "Q3.5", "Q3.7"],
       acceptance: ["The schema is created by migration and covered by tests.", "Every required field is stored: question, answer, model name and digest, response time, metadata, validation status."],
-      openQuestions: ["Final home after integration: a separate file, or tables in the RCK database?"],
-      history: [["2026-10-25", "Proposed."]]
+      openQuestions: ["Which machine runs the assistant and holds answers.db, given RCK's data lives in JSON on a network share?", "How validated answers reach other machines (export, or a single assistant host)."],
+      history: [["2026-10-25", "Proposed."], ["2026-10-26", "Latest RCK uses JSON files on a shared folder (F11): answers.db stays on local disk; open question on hosting."]]
     },
     {
       id: "AI-ADR-06", title: "Retrieval-first answering versus model inference", status: "proposed",
@@ -199,8 +199,8 @@
     },
     {
       id: "AI-ADR-11", title: "RCK integration", status: "proposed",
-      context: "The latest RCK (Engineering Cases, 73 + 50 tests) is on the company PC and has not been inspected. Table names, columns, auth and approval flows must not be invented.",
-      decision: "Direction:\n- Integrate through adapters: an RckTicketSource, an assistant service module, and an API router behind RCK session auth.\n- The client goes through the existing api.py bridge (CSP connect-src 'none').\n- The concrete design is decided only after the read-only audit (Q7.1).",
+      context: "The latest RCK (Engineering Cases, 73 + 50 tests) is on the company PC and has not been inspected. It stores its data as JSON files in a shared network folder (F11), not SQLite. File names, field names, auth and approval flows must not be invented.",
+      decision: "Direction:\n- Integrate through adapters: an RckTicketSource that reads the shared JSON folder **read-only**, an assistant service module, and an API behind RCK auth.\n- The assistant never writes to RCK's folder; its own answers.db stays on local disk.\n- The client goes through the existing api.py bridge (CSP connect-src 'none').\n- The concrete design is decided only after the read-only audit (Q7.1).",
       alternatives: [
         ["Design against the local RCK copy", "Outdated; high risk of rework."],
         ["Fork the assistant into RCK now", "Couples unfinished work to an unknown codebase."]
@@ -213,8 +213,8 @@
       related: ["AI-ADR-04", "AI-ADR-05", "AI-ADR-13"],
       quests: ["Q7.1", "Q7.2", "Q7.3", "Q7.4", "Q7.5"],
       acceptance: ["The existing RCK test suites still pass.", "New integration tests pass.", "No company data is copied off the company PC."],
-      openQuestions: ["The ticket/case schema and the approval field.", "The auth and role model.", "Where answers.db lives.", "How ticket updates are tracked.", "The deployment model of the RCK server."],
-      history: [["2026-10-25", "Proposed; blocked on access to the latest source."]]
+      openQuestions: ["The JSON folder layout, file naming and ticket/case fields, including the approval field.", "How RCK writes the files (atomic replace or in-place) and whether several clients write concurrently.", "The auth and role model.", "Which machine runs the assistant and holds answers.db.", "How ticket updates are tracked (update field or file modified time)."],
+      history: [["2026-10-25", "Proposed; blocked on access to the latest source."], ["2026-10-26", "Storage is JSON files on a shared folder (F11): adapter reads the folder read-only."]]
     },
     {
       id: "AI-ADR-12", title: "GPU deployment", status: "proposed",
