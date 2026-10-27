@@ -10,7 +10,8 @@
   const ADR_STATUSES = ["proposed", "accepted", "superseded", "rejected"];
   const ASSUMPTION_STATES = ["unverified", "confirmed", "refuted"];
   const PRIORITY_ORDER = { P0: 0, P1: 1, P2: 2, P3: 3 };
-  const EDIT_FIELDS = ["notes", "testResults", "actual", "filesChanged", "limitations", "decisions", "blockers", "followUps"];
+  // "report" is the one big box (Claude's completion report); the others are kept for older records.
+  const EDIT_FIELDS = ["report", "notes", "testResults", "actual", "filesChanged", "limitations", "decisions", "blockers", "followUps"];
   const SCHEMA = 1;
 
   function emptyState() {
@@ -260,7 +261,9 @@
     const adrLines = (q.adrs || []).map((id) => {
       const a = adrById[id];
       if (!a) return `- ${id}`;
-      const dec = a.decision.split("\n")[0];
+      // Whole decision on one line (decisions are multi-line lists); full text lives in questline/data/adrs.js.
+      const flat = a.decision.replace(/\s*\n+\s*/g, " ").trim();
+      const dec = flat.length > 500 ? flat.slice(0, 497) + "…" : flat;
       return `- ${a.id} ${a.title} [${adrStatus(a, state)}]: ${dec}`;
     });
     const depLines = (q.deps || []).map((d) => `- ${d} ${byId[d] ? byId[d].title : "(unknown)"}: ${byId[d] ? STATUS_LABEL[questStatus(byId[d], state)] : "?"}`);

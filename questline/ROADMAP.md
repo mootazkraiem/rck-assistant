@@ -1,6 +1,6 @@
 # RCK AI Assistant: Roadmap
 
-_Generated from Questline on 2026-10-26. Source of truth: questline/data/*.js plus your saved progress._
+_Generated from Questline on 2026-10-27. Source of truth: questline/data/*.js plus your saved progress._
 
 ## Mission
 Give RCK engineers fast, cited answers from approved engineering knowledge, serving reviewed answers from a database first and calling a local model only when needed.

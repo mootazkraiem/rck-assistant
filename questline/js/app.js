@@ -230,7 +230,7 @@ window.QuestlineStart = function (store, initialState) {
         </table>
       </div>
       <div class="card"><h2>Risks and blockers</h2>
-        ${blocked.length ? `<div class="callout bad"><b>Blocked quests:</b> ${blocked.map((q) => `${qLink(q.id)} ${esc(qs(q.id).fields.blockers || "(no reason recorded)")}`).join("<br>")}</div>` : ""}
+        ${blocked.length ? `<div class="callout bad"><b>Blocked quests:</b> ${blocked.map((q) => { const f = qs(q.id).fields; const why = f.blockers || (f.report || "").trim().split("\n")[0]; return `${qLink(q.id)} ${esc(why ? why.slice(0, 160) : "(no reason recorded)")}`; }).join("<br>")}</div>` : ""}
         <table><tr><th>Risk</th><th>Mitigation</th></tr>
         ${D.risks.map((r) => `<tr><td>${pill(r.level, r.level)} <strong>${esc(r.title)}</strong><div class="small secondary">${rich(r.impact)}</div></td><td class="small">${rich(r.mitigation)}</td></tr>`).join("")}
         </table>
@@ -362,8 +362,7 @@ window.QuestlineStart = function (store, initialState) {
     return [
       ["All dependencies are done", L.unmetDeps(q, D, state).length === 0],
       ["All acceptance criteria are ticked", acc.every((_, i) => s.ack[i])],
-      ["Test results recorded", !!(s.fields.testResults || "").trim() || q.status === "done"],
-      ["Actual results recorded", !!(s.fields.actual || "").trim() || !!q.actual],
+      ["Completion report pasted", ["report", "actual", "testResults"].some((k) => (s.fields[k] || "").trim()) || !!q.actual],
       ["External dependency resolved", !q.external || !!s.externalCleared]
     ];
   }
@@ -380,17 +379,16 @@ window.QuestlineStart = function (store, initialState) {
   function questCompletion(q, s) {
     const ro = canQ(q) ? "" : " readonly";
     const by = (k) => { const b = s._b && s._b["f." + k]; return b && b !== me ? ` <span class="muted small">· by ${esc(memberName(b))}</span>` : ""; };
-    const field = (k, label, hint, rows) => `<label class="field"><span>${label}${by(k)}</span><textarea data-field="${k}" data-id="${esc(q.id)}" rows="${rows || 3}" placeholder="${esc(ro ? "" : hint || "")}"${ro}>${esc(s.fields[k] || "")}</textarea></label>`;
-    return `<h3>Definition of done</h3>${list(L.standardDoD(q), "secondary")}
+    // Earlier records typed into the old separate boxes stay visible, read-only.
+    const OLD = [["actual", "Actual results"], ["testResults", "Test results"], ["filesChanged", "Files changed"], ["limitations", "Known limitations"],
+      ["decisions", "Decisions made"], ["blockers", "Blockers"], ["followUps", "Follow-up tasks"], ["notes", "Notes"]];
+    const old = OLD.filter(([k]) => (s.fields[k] || "").trim());
+    return `<label class="field"><span><strong>Completion report</strong>${by("report")} <span class="muted small">(paste Claude's whole report here, or write your own notes; saved automatically)</span></span>
+        <textarea class="report-box" data-field="report" data-id="${esc(q.id)}" rows="22" placeholder="${ro ? "" : "Paste the completion report: summary, files changed, commands and results, acceptance criteria, measurements, limitations, decisions, follow-ups, blockers."}"${ro}>${esc(s.fields.report || "")}</textarea></label>
+      ${old.length ? `<h3>Earlier notes</h3>${old.map(([k, label]) => `<p class="small"><strong>${label}${by(k)}:</strong></p><div class="readonly">${esc(s.fields[k])}</div>`).join("")}` : ""}
       ${q.actual ? `<h3>Recorded results (from the project data)</h3><div class="readonly">${esc(q.actual)}</div>` : ""}
       ${q.filesChanged ? `<div class="readonly"><b>Files:</b> ${esc(q.filesChanged)}</div>` : ""}
-      ${(q.limitations || []).length ? `<h3>Known limitations (planned)</h3>${list(q.limitations)}` : ""}
-      ${(q.followUps || []).length ? `<h3>Follow-ups (planned)</h3>${list(q.followUps)}` : ""}
-      <h3>Your record <span class="muted small">(saved automatically)</span></h3>
-      <div class="grid g2">
-        <div>${field("actual", "Actual results", "Measurements, outcomes…", 4)}${field("testResults", "Test results", "Exact commands and pass/fail counts", 4)}${field("filesChanged", "Files changed", "path: created/modified")}${field("limitations", "Known limitations")}</div>
-        <div>${field("decisions", "Decisions made")}${field("blockers", "Blockers", "What blocks this quest and who can unblock it")}${field("followUps", "Follow-up tasks")}${field("notes", "Notes and implementation findings", "", 5)}</div>
-      </div>`;
+      <h3>Definition of done</h3>${list(L.standardDoD(q), "secondary")}`;
   }
   function questHistory(q, s) {
     const h = (s.history || []).slice().reverse();
@@ -408,7 +406,7 @@ window.QuestlineStart = function (store, initialState) {
     if (from === to || !canQ(q)) return;
     const apply = (forced) => {
       recordStatus(id, to, forced); render(true);
-      if (to === "blocked" && !(s.fields.blockers || "").trim()) { currentTab = "completion"; render(true); toast("Record the blocker in the Blockers field."); const el = document.querySelector('[data-field="blockers"]'); if (el) el.focus(); }
+      if (to === "blocked") { currentTab = "completion"; render(true); toast("Write what blocks this quest in the report."); const el = document.querySelector('[data-field="report"]'); if (el) el.focus(); }
       else toast(`${id} → ${L.STATUS_LABEL[to]}`);
     };
     if (to === "done") {

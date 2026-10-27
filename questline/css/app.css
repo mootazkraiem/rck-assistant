@@ -167,6 +167,7 @@ a.chip:hover { text-decoration: none; border-color: var(--accent-2); }
 .seg button[aria-pressed="true"].st-done { background: var(--ok-soft); color: var(--ok); }
 select, input[type="text"], input[type="search"], textarea { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px; padding: 7px 10px; }
 textarea { width: 100%; min-height: 76px; resize: vertical; }
+textarea.report-box { min-height: 460px; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; }
 label.field { display: block; margin-bottom: 12px; }
 label.field > span { display: block; font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 4px; }
 .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }

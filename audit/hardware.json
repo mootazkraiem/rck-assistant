@@ -1,0 +1,45 @@
+{
+  "generated_at": "2026-10-27T09:09:13.628868+00:00",
+  "os": {
+    "caption": "Microsoft Windows 11 Famille Unilingue",
+    "version": "10.0.26200",
+    "build": "26200",
+    "architecture": "64 bits",
+    "error": null
+  },
+  "cpu": {
+    "name": "AMD Ryzen 7 7435HS",
+    "cores": 8,
+    "logical_processors": 16,
+    "error": null
+  },
+  "ram": {
+    "total_gb": 23.82,
+    "free_gb": 12.2,
+    "error": null
+  },
+  "gpu": {
+    "name": "NVIDIA GeForce RTX 2050",
+    "vram_mb": 4096.0,
+    "driver_version": "566.07",
+    "error": null
+  },
+  "disk": {
+    "drive": "C:",
+    "total_gb": 447.39,
+    "free_gb": 22.33,
+    "error": null
+  },
+  "python": {
+    "version": "3.14.4",
+    "error": null
+  },
+  "node": {
+    "version": "v24.18.0",
+    "error": null
+  },
+  "ollama": {
+    "version": "ollama version is 0.40.11",
+    "error": null
+  }
+}
