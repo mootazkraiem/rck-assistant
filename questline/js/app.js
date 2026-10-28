@@ -24,7 +24,11 @@ window.QuestlineStart = function (store, initialState) {
   const canQ = (q) => L.canEditQuest(session, q, state);
   const members = () => ((session.team && session.team.members) || []);
   const memberName = (id) => { const m = members().find((x) => x.id === id); return m ? m.name : id; };
-  const ROLE_LABEL = { owner: "Owner", contributor: "Contributor", viewer: "Viewer" };
+  const ROLE_LABEL = { owner: "Owner", contributor: "Contributor", agent: "Agent (Claude Code)", viewer: "Viewer" };
+  const ROLES = ["owner", "contributor", "agent", "viewer"];
+  const agentIds = () => members().filter((m) => m.role === "agent").map((m) => m.id);
+  // Quests assigned to an Agent get the CLI-submission prompt (tools/ql.js).
+  const promptFor = (q) => L.buildPrompt(q, D, state, { agent: agentIds().includes(L.assigneeOf(q, state)) });
 
   /* ───────── persistence (through the store) ───────── */
   let saveTimer = null; // pending debounced save, flushed on unload
@@ -326,6 +330,8 @@ window.QuestlineStart = function (store, initialState) {
     ${q.external ? `<div class="callout ext"><b>External dependency:</b> ${esc(q.external)}
       <label style="display:inline-flex;gap:6px;margin-left:10px"><input type="checkbox" data-action="external-cleared" data-id="${esc(q.id)}" ${s.externalCleared ? "checked" : ""}${dis}> Resolved</label></div>` : ""}
     ${d === "locked" ? `<div class="callout">Waiting on: ${L.unmetDeps(q, D, state).map(qLink).join(" ")}. You can still prepare it, but finish its dependencies first.</div>` : ""}
+    ${s._rejected ? `<div class="callout bad"><strong>A "Done" was refused</strong>${s._rejected.by ? ` (set by ${esc(memberName(s._rejected.by))}${s._rejected.at ? " on " + esc(fmtDate(s._rejected.at)) : ""})` : ""}. The quest stays In progress until these are fixed:${list(s._rejected.reasons)}</div>` : ""}
+    ${agentPanel(q, s)}
     <div class="card">
       <div class="btn-row" style="justify-content:space-between;margin-bottom:14px">
         <div class="seg" role="group" aria-label="Quest status">${statusBtns}</div>
@@ -357,15 +363,62 @@ window.QuestlineStart = function (store, initialState) {
       <h3>Potential failures and troubleshooting</h3>
       ${(q.failures || []).length ? `<table><tr><th>If this happens</th><th>Do this</th></tr>${q.failures.map((f) => `<tr><td><strong>${rich(f[0])}</strong></td><td class="secondary">${rich(f[1])}</td></tr>`).join("")}</table>` : '<p class="muted">None identified.</p>'}`;
   }
-  function gateChecks(q, s) {
+  /* Claude's report (written by tools/ql.js into the agent's own file) and the owner's review.
+     Everything is shown as text: nothing in a report is ever executed. */
+  function agentPanel(q, s) {
+    const { report: r, review, accepted } = L.agentReportOf(s);
+    if (!r) return "";
+    const state_ = accepted ? ["done", "Accepted"] : review ? ["blocked", "Rejected"] : ["proposed", "Awaiting review"];
     const acc = q.acceptance || [];
-    return [
-      ["All dependencies are done", L.unmetDeps(q, D, state).length === 0],
-      ["All acceptance criteria are ticked", acc.every((_, i) => s.ack[i])],
-      ["Completion report pasted", ["report", "actual", "testResults"].some((k) => (s.fields[k] || "").trim()) || !!q.actual],
-      ["External dependency resolved", !q.external || !!s.externalCleared]
-    ];
+    const t = r.tests || {};
+    const rows = (arr, fn) => (Array.isArray(arr) && arr.length ? arr.map(fn).join("") : "");
+    const owner = canP() && !readOnly;
+    return `<div class="card agent-report">
+      <div class="btn-row" style="justify-content:space-between">
+        <h2 style="margin:0">Claude's report: ${pill(state_[0], state_[1])}</h2>
+        <span class="small secondary">Submitted ${esc(fmtDate(r.submittedAt))}${r.agent ? " by " + esc(memberName(r.agent)) : ""} · reported status: <strong>${esc(r.status)}</strong></span>
+      </div>
+      ${review && !accepted ? `<div class="callout bad"><strong>Rejected</strong> by ${esc(memberName(review.by))} on ${esc(fmtDate(review.at))}${review.note ? `: ${esc(review.note)}` : ""}. Claude can resubmit.</div>` : ""}
+      ${accepted ? `<div class="callout ok"><strong>Accepted</strong> by ${esc(memberName(review.by))} on ${esc(fmtDate(review.at))}. Check the ticks on the Validation tab, then click <strong>Done</strong>.</div>` : ""}
+      <p>${esc(r.summary || "")}</p>
+      <div class="grid g2">
+        <div><h3>Acceptance criteria</h3><table><tr><th>Criterion</th><th>Claude says</th><th>Evidence</th></tr>
+          ${rows(r.acceptance, (a) => `<tr><td>${esc(acc[a.index] || `#${a.index + 1}`)}</td><td>${a.met ? pill("done", "met") : pill("blocked", "not met")}</td><td class="small">${esc(a.evidence || "")}</td></tr>`)}</table></div>
+        <div><h3>Tests</h3><p><strong>${Number(t.passed) || 0} passed</strong>, <strong>${Number(t.failed) || 0} failed</strong></p>${t.summary ? `<pre class="small">${esc(t.summary)}</pre>` : ""}
+          <h3>Files</h3>${Array.isArray(r.filesChanged) && r.filesChanged.length ? `<ul class="files">${r.filesChanged.map((f) => `<li>${esc(f.change)}: ${esc(f.path)}</li>`).join("")}</ul>` : '<p class="muted">None.</p>'}</div>
+      </div>
+      <h3>Commands Claude reports it ran <span class="muted small">(text only, never executed here)</span></h3>
+      ${rows(r.commands, (c) => `<div class="cmd"><pre>${esc(c.command)}${c.exitCode !== undefined ? `   → exit ${esc(c.exitCode)}` : ""}\n${esc(c.result || "")}</pre></div>`) || '<p class="muted">None.</p>'}
+      <div class="grid g3">
+        <div><h3>Limitations</h3>${list(r.limitations)}</div>
+        <div><h3>Decisions</h3>${list(r.decisions)}</div>
+        <div><h3>Blockers</h3>${list(r.blockers)}</div>
+      </div>
+      ${r.nextQuest ? `<p><strong>Recommended next quest:</strong> ${qLink(r.nextQuest)}</p>` : ""}
+      ${owner && !accepted ? `<div class="btn-row"><button class="btn primary" data-action="accept-report" data-id="${esc(q.id)}">Accept report</button><button class="btn danger" data-action="reject-report" data-id="${esc(q.id)}">Reject report</button>
+        <span class="small muted">Accepting ticks the criteria Claude marked as met and records the report. It does not mark the quest Done.</span></div>` : ""}
+    </div>`;
   }
+  function reviewReport(id, decision, note) {
+    const q = qById[id]; const s = qs(id);
+    const { report } = L.agentReportOf(s);
+    if (!report || !canP()) return;
+    const ticked = [];
+    if (decision === "accepted") {
+      for (const a of report.acceptance || []) {
+        if (a.met && Number.isInteger(a.index) && a.index >= 0 && a.index < (q.acceptance || []).length) {
+          s.ack[a.index] = true; touch(s, "ack." + a.index); ticked.push(a.index);
+        }
+      }
+    }
+    s.fields.reportReview = JSON.stringify({ submittedAt: report.submittedAt, decision, by: me || "owner", at: new Date().toISOString(), ...(note ? { note } : {}), ...(ticked.length ? { ticked } : {}) });
+    touch(s, "f.reportReview");
+    save(); render(true);
+    toast(decision === "accepted" ? `Report accepted: ${ticked.length} criteria ticked. Click Done when you're satisfied.` : "Report rejected. Claude can resubmit.");
+  }
+
+  // The same checks the merge enforces (logic.js completionChecks): one rule set everywhere.
+  const gateChecks = (q) => L.completionChecks(q, D, state).map((c) => [c.label, c.ok]);
   function questValidation(q, s) {
     const t = q.tests || {};
     return `<h3>Acceptance criteria <span class="muted small">(tick each one as you verify it)</span></h3>
@@ -374,7 +427,7 @@ window.QuestlineStart = function (store, initialState) {
       <div class="grid g3"><div><h3>Unit tests</h3>${list(t.unit)}</div><div><h3>Integration tests</h3>${list(t.integration)}</div><div><h3>Manual verification</h3>${list(t.manual)}</div></div>
       <div class="secondary"><h3>Evidence or reports to save</h3>${list(q.evidence)}</div>
       <h3>Conditions before marking complete</h3>
-      <ul class="checklist gate">${gateChecks(q, s).map(([t2, ok]) => `<li class="${ok ? "ok" : ""}">${esc(t2)}</li>`).join("")}</ul>`;
+      <ul class="checklist gate">${gateChecks(q).map(([t2, ok]) => `<li class="${ok ? "ok" : ""}">${esc(t2)}</li>`).join("")}</ul>`;
   }
   function questCompletion(q, s) {
     const ro = canQ(q) ? "" : " readonly";
@@ -395,29 +448,27 @@ window.QuestlineStart = function (store, initialState) {
     return `<h3>Status history</h3>${h.length ? `<ul class="history">${h.map((e) => `<li><strong>${esc(L.STATUS_LABEL[e.from] || e.from)} → ${esc(L.STATUS_LABEL[e.to] || e.to)}</strong> <span class="secondary">· ${esc(fmtDate(e.at))}${e.by ? " · " + esc(memberName(e.by)) : ""}${e.forced ? " · marked done with unmet conditions" : ""}</span></li>`).join("")}</ul>` : '<p class="muted">No changes recorded yet.</p>'}`;
   }
 
-  function recordStatus(id, to, forced) {
+  function recordStatus(id, to) {
     const s = qs(id); const from = L.questStatus(qById[id], state);
     s.status = to; touch(s, "status");
-    s.history.push({ at: new Date().toISOString(), from, to, ...(me ? { by: me } : {}), ...(forced ? { forced: true } : {}) });
+    delete s._rejected; // a new decision replaces an earlier refusal
+    s.history.push({ at: new Date().toISOString(), from, to, ...(me ? { by: me } : {}) });
     save();
   }
   function setStatus(id, to) {
     const q = qById[id]; const s = qs(id); const from = L.questStatus(q, state);
     if (from === to || !canQ(q)) return;
-    const apply = (forced) => {
-      recordStatus(id, to, forced); render(true);
-      if (to === "blocked") { currentTab = "completion"; render(true); toast("Write what blocks this quest in the report."); const el = document.querySelector('[data-field="report"]'); if (el) el.focus(); }
-      else toast(`${id} → ${L.STATUS_LABEL[to]}`);
-    };
     if (to === "done") {
-      const unmet = gateChecks(q, s).filter((c) => !c[1]);
+      // No override: Done needs every condition (the merge would refuse it anyway).
+      const unmet = L.completionProblems(q, D, state);
       if (unmet.length) {
-        modal(`Mark ${id} as done?`, `<p>These completion conditions are not satisfied:</p>${list(unmet.map((c) => c[0]))}<p class="small muted">Marking it done anyway is recorded in the quest history.</p>`,
-          [{ label: "Cancel" }, { label: "Mark done anyway", cls: "danger", run: () => apply(true) }]);
+        modal(`${id} can't be marked Done yet`, `<p>These conditions are not met:</p>${list(unmet)}<p class="small muted">Fix them (Validation and Completion tabs), then click Done again.</p>`, [{ label: "OK", cls: "primary" }]);
         return;
       }
     }
-    apply(false);
+    recordStatus(id, to); render(true);
+    if (to === "blocked") { currentTab = "completion"; render(true); toast("Write what blocks this quest in the report."); const el = document.querySelector('[data-field="report"]'); if (el) el.focus(); }
+    else toast(`${id} → ${L.STATUS_LABEL[to]}`);
   }
 
   /* Opens a new Claude Code tab in VS Code with the quest prompt pre-filled (the extension's
@@ -430,7 +481,7 @@ window.QuestlineStart = function (store, initialState) {
     if (!canQ(q) || readOnly) return;
     const go = () => {
       if (!["in_progress", "done"].includes(L.questStatus(q, state))) recordStatus(id, "in_progress");
-      const text = L.buildPrompt(q, D, state);
+      const text = promptFor(q);
       copyText(text); // backup in case the link handler is blocked
       openUri(VSCODE_OPEN + encodeURIComponent(text));
       render(true);
@@ -446,7 +497,7 @@ window.QuestlineStart = function (store, initialState) {
   }
 
   function showPrompt(id) {
-    const text = L.buildPrompt(qById[id], D, state);
+    const text = promptFor(qById[id]);
     modal(`Claude Code prompt: ${id}`, `<p class="small muted">Paste it into Claude Code in <code>${esc(D.project.workingDir)}</code>. It scopes the agent to this quest only and requires a completion report.</p><pre>${esc(text)}</pre>`,
       [{ label: "Close" }, { label: "Copy", cls: "primary", run: () => { copyText(text).then((ok) => toast(ok ? "Prompt copied" : "Copy failed: select the text manually")); return false; } }]);
   }
@@ -619,12 +670,12 @@ window.QuestlineStart = function (store, initialState) {
     <div class="card"><h2>Members</h2>
       <table><tr><th>Member</th><th>Role</th><th>Assigned</th><th>In progress</th><th>Done</th>${owner ? "<th></th>" : ""}</tr>
       ${members().map((m) => `<tr><td><strong>${esc(m.name)}</strong>${m.id === me ? ' <span class="chip">you</span>' : ""}<div class="small muted">${esc(m.id)}</div></td>
-        <td>${owner && m.id !== me ? `<select data-action="team-role" data-id="${esc(m.id)}" aria-label="Role of ${esc(m.name)}">${["owner", "contributor", "viewer"].map((r) => `<option value="${r}" ${m.role === r ? "selected" : ""}>${ROLE_LABEL[r]}</option>`).join("")}</select>` : esc(ROLE_LABEL[m.role])}</td>
+        <td>${owner && m.id !== me ? `<select data-action="team-role" data-id="${esc(m.id)}" aria-label="Role of ${esc(m.name)}">${ROLES.map((r) => `<option value="${r}" ${m.role === r ? "selected" : ""}>${ROLE_LABEL[r]}</option>`).join("")}</select>` : esc(ROLE_LABEL[m.role])}</td>
         <td>${count(m, () => true)}</td><td>${count(m, (q) => L.questStatus(q, state) === "in_progress")}</td><td>${count(m, (q) => L.questStatus(q, state) === "done")}</td>
         ${owner ? `<td>${m.id !== me ? `<button class="btn sm danger" data-action="team-remove" data-id="${esc(m.id)}">Remove</button>` : ""}</td>` : ""}</tr>`).join("")}
       </table>
       ${owner ? `<h3>Add a member</h3><div class="btn-row"><input type="text" id="newMemberName" placeholder="Name" style="min-width:200px">
-        <select id="newMemberRole" aria-label="Role"><option value="contributor">Contributor</option><option value="viewer">Viewer</option><option value="owner">Owner</option></select>
+        <select id="newMemberRole" aria-label="Role"><option value="contributor">Contributor</option><option value="agent">Agent (Claude Code)</option><option value="viewer">Viewer</option><option value="owner">Owner</option></select>
         <button class="btn primary" data-action="team-add">Add</button></div>
         <p class="small secondary" style="margin-top:8px">They then run the app on their PC, choose the same synced folder, and enter this exact name.</p>` : ""}
     </div>
@@ -632,6 +683,7 @@ window.QuestlineStart = function (store, initialState) {
       <div class="card"><h2>Roles</h2><ul>
         <li><strong>Owner:</strong> everything: assigns quests, changes any quest, ADRs, assumptions and the team.</li>
         <li><strong>Contributor:</strong> works only on the quests assigned to them (status, ticks, notes, results). Edits to other quests are ignored when files are merged.</li>
+        <li><strong>Agent (Claude Code):</strong> submits reports through <code>node questline/tools/ql.js</code> for the quests assigned to it, and can set them In progress or Blocked. It can never mark Done, tick criteria or change assignments: you review its report and decide.</li>
         <li><strong>Viewer:</strong> read-only. Your manager needs no install: they open <code>Open Questline.html</code> in the shared folder.</li></ul>
         <p class="small secondary">Identity is the name entered on each PC. Real access control comes from the folder's sharing settings: share it read-only with your manager.</p></div>
       <div class="card"><h2>This PC</h2>
@@ -692,7 +744,7 @@ window.QuestlineStart = function (store, initialState) {
     const { action, id, i } = el.dataset;
     switch (action) {
       case "set-status": setStatus(id, el.dataset.status); break;
-      case "copy-prompt": copyText(L.buildPrompt(qById[id], D, state)).then((ok) => (ok ? toast(`Claude Code prompt for ${id} copied`) : showPrompt(id))); break;
+      case "copy-prompt": copyText(promptFor(qById[id])).then((ok) => (ok ? toast(`Claude Code prompt for ${id} copied`) : showPrompt(id))); break;
       case "preview-prompt": showPrompt(id); break;
       case "start-vscode": startInVSCode(id); break;
       case "copy-cmd": copyText(qById[id].commands[+i]).then((ok) => toast(ok ? "Command copied" : "Copy failed")); break;
@@ -727,6 +779,11 @@ window.QuestlineStart = function (store, initialState) {
           [{ label: "Cancel" }, { label: "Reset", cls: "danger", run: () => { addSnapshot("Before reset"); state = L.emptyState(); save(); render(true); toast("Progress reset"); } }]);
         break;
       case "open-project": openUri(vscodeFolderUri()); break;
+      case "accept-report": reviewReport(id, "accepted"); break;
+      case "reject-report":
+        modal(`Reject Claude's report for ${id}?`, `<label class="field"><span>Reason (shown to Claude on resubmission)</span><textarea id="rejectNote" rows="4"></textarea></label>`,
+          [{ label: "Cancel" }, { label: "Reject", cls: "danger", run: () => reviewReport(id, "rejected", ($("#rejectNote").value || "").trim().slice(0, 1000)) }]);
+        break;
       case "reload": location.reload(); break;
       case "team-add": {
         const name = ($("#newMemberName").value || "").trim(); const role = $("#newMemberRole").value;

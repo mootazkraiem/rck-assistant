@@ -8,42 +8,25 @@ On first run it asks for the shared sync folder and your name. Progress is saved
 the team workflow.
 """
 import functools
-import http.server
 import os
 import sys
-import threading
 from pathlib import Path
 
 import webview
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from store import Store, StoreError  # noqa: E402
+from webserver import start_in_background  # noqa: E402
 
 # In the .exe, the dashboard files are unpacked to sys._MEIPASS; from source, they are in questline/.
 WEB_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
 PREFERRED_PORT = 8766
 
 
-class QuietHandler(http.server.SimpleHTTPRequestHandler):
-    def log_message(self, *args):
-        pass
-
-    def end_headers(self):
-        self.send_header("Cache-Control", "no-store")
-        super().end_headers()
-
-
 def start_server() -> int:
-    """Serve the dashboard on 127.0.0.1. A fixed port keeps browser-side UI preferences."""
-    handler = functools.partial(QuietHandler, directory=str(WEB_ROOT))
-    for port in (PREFERRED_PORT, 0):
-        try:
-            server = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
-            break
-        except OSError:
-            continue
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server.server_address[1]
+    """Serve the dashboard assets on 127.0.0.1 (allowlist, no port sharing: see webserver.py).
+    A fixed port keeps browser-side UI preferences; if it is taken, any free port."""
+    return start_in_background(WEB_ROOT, (PREFERRED_PORT, 0))
 
 
 def _guard(fn):

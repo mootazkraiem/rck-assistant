@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(//c/SHARED_FOLDER/**)",
+      "Edit(//c/SHARED_FOLDER/**)",
+      "Read(~/AppData/Roaming/Questline/**)",
+      "Edit(~/AppData/Roaming/Questline/**)",
+      "Edit(/questline/**)"
+    ],
+    "allow": [
+      "Bash(node questline/tools/ql.js list)",
+      "Bash(node questline/tools/ql.js show *)",
+      "Bash(node questline/tools/ql.js submit *)",
+      "Edit(/.questline-reports/**)"
+    ],
+    "disableBypassPermissionsMode": "disable"
+  }
+}

@@ -147,9 +147,100 @@ Global search: press `/`, then use the arrow keys and Enter.
    - the restrictions (no external LLM APIs, no paid services, synthetic data only, no unrelated changes);
    - a required completion report, followed by **STOP**.
 3. Paste the agent's report into the **Completion** tab and tick the acceptance criteria
-   on the **Validation** tab.
-4. Click **Done**. If any completion condition is unmet, the dashboard warns you and
-   records any forced completion in the history.
+   on the **Validation** tab. (Or let Claude submit it itself: see the next section.)
+4. Click **Done**. Done is only accepted when every condition holds, and there is no
+   override. The conditions are:
+   - all dependencies are done;
+   - every acceptance criterion is ticked;
+   - a report is recorded (or Claude's report has been accepted);
+   - any external dependency is resolved.
+
+   The same rule is enforced when progress files are merged, so it also applies to a
+   colleague's or a hand-edited file: a refused Done shows on the quest as **"A Done was
+   refused"**, with the reasons.
+
+## Claude Code integration (Agent member)
+
+Claude Code can read its quest and submit its report straight into Questline. **You
+still decide:** Claude can never mark a quest Done or tick criteria.
+
+**Requirements:**
+- The **desktop app** (team mode), since browser-only mode keeps progress in browser
+  storage, which no other program can read.
+- **Node.js 18 or newer** on the PC where Claude Code runs. Check with `node --version`.
+
+**One-time setup:**
+1. In Questline, go to **Team**, add **Claude** with the role **Agent (Claude Code)**.
+2. In `rck-assistant`, copy `questline/claude-settings.example.json` to
+   `.claude/settings.local.json` (not committed). Replace `SHARED_FOLDER` with your
+   shared folder in `//c/...` form (`C:\Users\me\Questline-Shared` becomes
+   `//c/Users/me/Questline-Shared`).
+
+**For each quest:**
+1. On the quest page, set **Assigned to = Claude**. This is your per-quest permission.
+2. **▶ Start in VS Code** opens Claude with the agent version of the prompt. Its last
+   section tells Claude to:
+   - run `node questline/tools/ql.js show <id>` first;
+   - write its report to `.questline-reports/<id>.json` (git-ignored);
+   - run `node questline/tools/ql.js submit .questline-reports/<id>.json`.
+3. Within about 15 seconds, the quest shows **Claude's report: Awaiting review**, with
+   the summary, the criteria and their evidence, the tests, files and commands (as text,
+   never executed), limitations, decisions, blockers and the suggested next quest.
+4. **Accept report** ticks the criteria Claude marked as met, and records the report as
+   the completion report. **Reject report** asks for a reason, and Claude can resubmit.
+5. Check the ticks, then click **Done** yourself. The dependent quests unlock as usual.
+
+**What the CLI enforces:**
+- `show` refuses quests that aren't assigned to the agent, are already Done, have
+  unfinished dependencies, or have an unresolved external dependency.
+- `submit` rejects:
+  - unknown keys and a wrong `questId`;
+  - wrong criterion counts or duplicate indexes;
+  - "completed" with unmet criteria or failed tests, and "blocked" without a blocker;
+  - absolute paths, `..` and `.git` paths;
+  - oversized fields and files over 256 KB.
+
+  Nothing is written when the report is rejected.
+- **What it writes:** only `progress/<agent>.js`, by atomic replace. Never your file or
+  the team file. Commands in reports are stored as text and never run.
+- **What that file can change** (limited again by the merge): its report, and the status
+  **In progress** or **Blocked**, on quests assigned to it. It can't mark Done, tick
+  criteria, write notes, change the assignee or touch ADRs and assumptions. A forged
+  Done in the agent's file is ignored.
+
+**What the permissions do and don't stop.** Questline itself can't stop a program on
+your PC from editing files. The real limits are:
+- **The settings file:** it denies Claude's file tools access to the shared folder,
+  `%APPDATA%\Questline` and `questline/`, and allows only the three `ql.js` commands
+  for progress.
+  - Per Claude Code's docs, these rules also cover shell commands it recognises (such as
+    `cat` or `sed`) and output redirection (`>` into a file).
+  - They do **not** cover a Python or Node script that opens files itself.
+  - For OS-level blocking, use Claude Code's sandboxing, where your platform supports it.
+- **Keep Claude Code in Manual mode** (it asks before each shell command) for quests
+  that touch sensitive files. `disableBypassPermissionsMode` blocks the "skip all
+  permissions" mode.
+- **The merge rules and your review** are the second layer. Anything written as the
+  agent is limited as described above, and nothing becomes Done without you.
+
+## Moving the shared folder
+
+Close every Questline window first, then run:
+```powershell
+python questline\desktop\migrate_shared.py --to "C:\Users\me\Questline-Shared"
+```
+It:
+1. refuses while Questline runs, and refuses to overwrite a folder that already holds
+   Questline files;
+2. backs up the team file, every progress file and `config.json` to
+   `%APPDATA%\Questline\backups\migration-<time>`, and checks the copies byte for byte;
+3. copies the files to the new folder and checks them again;
+4. switches the setting, then republishes the manager view.
+
+It never deletes anything: remove the old copies yourself after checking.
+
+**Keep the shared folder outside `rck-assistant`.** That repo is public, and the local web
+server must never sit next to progress files.
 
 ## Persistence and backup
 
@@ -206,6 +297,23 @@ quest (P0–P6) that depends on GPU or RCK work. The second command regenerates
 
 ## Tests run on this build
 
+- **Integration build:**
+  - **`node --test`, 48 tests.** On top of the list below:
+    - **Central Done checks:** refused for owners and contributors without ticks, a
+      report or done dependencies; refusals cascade; existing valid progress is
+      preserved; the result is deterministic.
+    - **Agent permissions:** report and In progress/Blocked only; no Done, ticks,
+      reassignment, review fields, ADRs or assumptions; nothing on unassigned or Done
+      quests.
+    - **The CLI:** refusals; invalid reports with nothing written; only the agent's own
+      file written; commands never executed.
+  - **`python -m pytest -q questline/desktop/tests`:**
+    - local web server allowlist and no port sharing (29 tests);
+    - migration (4 tests).
+  - **`python questline\desktop\tests\e2e_agent_flow.py`:** the real app, hidden, with
+    temporary folders. 20/20 checks: assign, show, submit, awaiting review, Done refused,
+    reject, resubmit, accept with ticks, Done, next quest unlocks, forged agent Done
+    ignored.
 - `node --test` (25 tests): data integrity; the audit is the first quest; P0–P6 never
   depend on P7/P8; derived statuses; waves; the critical path; progress; filters; search;
   prompt contents; import validation; Markdown export.

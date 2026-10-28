@@ -32,7 +32,9 @@ TEAM_FILE = "questline-team.js"
 PROGRESS_DIR = "progress"
 APP_DIR = "app"
 LAUNCHER = "Open Questline.html"
-ROLES = ("owner", "contributor", "viewer")
+# "agent" = Claude Code. It never runs this app: it writes progress\<id>.js only through
+# tools\ql.js, and the merge (js/logic.js) limits what that file can change.
+ROLES = ("owner", "contributor", "agent", "viewer")
 MAX_BACKUPS = 15
 # Dashboard files copied into the shared folder for the read-only view.
 PUBLISHED = ["index.html", "css", "js", "data"]

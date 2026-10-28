@@ -7,6 +7,9 @@
   "use strict";
   window.QUESTLINE_SYNC = { items: [], push(x) { this.items.push(x); } }; // filled by questline-team.js / progress/*.js
   const L = window.QuestlineLogic;
+  const R = window.RCK;
+  // The plan, for the central Done checks applied on every load and merge.
+  const DATA = L.prepare({ ...R });
   const app = document.getElementById("app");
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -46,7 +49,12 @@
         if (localStorage.getItem(oldKey) !== null && localStorage.getItem(newKey) === null) localStorage.setItem(newKey, localStorage.getItem(oldKey));
       }
     } catch (e) { /* storage unavailable: nothing to migrate */ }
-    store.load = async () => { const raw = read(STORE_KEY, null); return (raw && L.validateState(raw).state) || L.emptyState(); };
+    store.load = async () => {
+      const raw = read(STORE_KEY, null);
+      const state = (raw && L.validateState(raw).state) || L.emptyState();
+      L.enforceCompletion(state, DATA);
+      return state;
+    };
     store.addSnapshot = async (reason, state) => {
       const list = snaps(); list.unshift({ at: new Date().toISOString(), reason, state: clone(state) });
       write(SNAP_KEY, list.slice(0, MAX));
@@ -74,7 +82,7 @@
     if (!team) return null;
     await Promise.all(team.members.map((m) => loadScript(`../progress/${encodeURIComponent(m.id)}.js`)));
     const entries = window.QUESTLINE_SYNC.items.filter((x) => x && x.kind === "progress").map((x) => ({ user: x.user, state: L.validateState(x.state).state || L.emptyState() }));
-    const merged = L.mergeStates(entries, team);
+    const merged = L.mergeStates(entries, team, DATA);
     return {
       kind: "viewer", storageOk: true,
       session: { mode: "viewer", team, savedAt: entries.map((e) => e.state.updatedAt).filter(Boolean).sort().pop() || null },
@@ -108,7 +116,7 @@
     const store = {
       kind: "desktop", storageOk: true, api,
       session: { mode: "desktop", user: me, name: loaded.session.name, role: loaded.session.role, team, syncFolder: loaded.session.sync_folder, ignored: loaded.ignored, errors: loaded.errors },
-      load: async () => L.mergeStates(entriesFrom(loaded), team),
+      load: async () => L.mergeStates(entriesFrom(loaded), team, DATA),
       save: async (state) => {
         try { const r = await call(api, "save", state); store.storageOk = true; return { ok: true, savedAt: r.savedAt }; }
         catch (e) { store.storageOk = false; return { ok: false, error: "Not saved to the sync folder: " + e.message }; }
@@ -122,7 +130,7 @@
         team = res.team;
         Object.assign(store.session, { team, role: res.session.role, ignored: res.ignored, errors: res.errors });
         const others = entriesFrom(res).filter((e) => e.user !== me);
-        return L.mergeStates([{ user: me, state: mine }, ...others], team);
+        return L.mergeStates([{ user: me, state: mine }, ...others], team, DATA);
       },
       snapshots: async () => (await call(api, "list_backups")).map((b) => ({ id: b.name, at: b.at, reason: b.reason })),
       addSnapshot: async (reason, state) => { await call(api, "add_backup", reason, state); },

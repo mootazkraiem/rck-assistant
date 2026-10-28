@@ -10,3 +10,6 @@ questline/questline-team.js
 questline/progress/
 questline/app/
 questline/Open Questline.html
+
+# Claude Code agent reports before submission (tools/ql.js)
+.questline-reports/

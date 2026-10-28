@@ -11,7 +11,10 @@
   const ASSUMPTION_STATES = ["unverified", "confirmed", "refuted"];
   const PRIORITY_ORDER = { P0: 0, P1: 1, P2: 2, P3: 3 };
   // "report" is the one big box (Claude's completion report); the others are kept for older records.
-  const EDIT_FIELDS = ["report", "notes", "testResults", "actual", "filesChanged", "limitations", "decisions", "blockers", "followUps"];
+  // agentReport: JSON written by the Claude Code CLI (tools/ql.js); reportReview: the owner's accept/reject.
+  const EDIT_FIELDS = ["report", "notes", "testResults", "actual", "filesChanged", "limitations", "decisions", "blockers", "followUps", "agentReport", "reportReview"];
+  const AGENT_STATUSES = ["in_progress", "blocked"]; // the only statuses an agent may set
+  const OWNER_ONLY_FIELDS = ["f.agentReport", "f.reportReview"]; // written by the agent / the owner's review only
   const SCHEMA = 1;
 
   function emptyState() {
@@ -48,6 +51,10 @@
       if (Array.isArray(q.history)) clean.history = q.history.filter(isObj).slice(-200);
       if (q.externalCleared !== undefined) clean.externalCleared = !!q.externalCleared;
       if (typeof q.assignee === "string" || q.assignee === null) clean.assignee = q.assignee;
+      // Set by enforceCompletion when a Done was refused; kept so the reason stays visible.
+      if (isObj(q._rejected) && Array.isArray(q._rejected.reasons)) {
+        clean._rejected = { at: String(q._rejected.at || ""), by: String(q._rejected.by || ""), reasons: q._rejected.reasons.map(String).slice(0, 10) };
+      }
       stamps(q, clean);
       out.quests[id] = clean;
     }
@@ -253,8 +260,42 @@
     ];
   }
 
-  /* Ready-to-paste Claude Code instruction for one quest. */
-  function buildPrompt(q, data, state) {
+  /* Section 9 for a quest assigned to an Agent: the report goes through the CLI, never by
+     editing Questline files. The JSON shape here is what tools/ql.js validates. */
+  function agentReportSection(q) {
+    const acc = (q.acceptance || []).map((a, i) => `    {"index": ${i}, "met": true, "evidence": "how you verified: ${a.replace(/"/g, "'").slice(0, 60)}…"}`).join(",\n");
+    return `## 9. Submit your completion report through Questline (do NOT edit Questline files)
+Questline tracks this quest. Never edit anything under the Questline shared folder or progress files yourself.
+1. Before you start, run:  node questline/tools/ql.js show ${q.id}
+   If it refuses (not assigned to you, dependencies not done, already done), STOP and tell me why.
+2. When finished, write your report as JSON to  .questline-reports/${q.id}.json  (git-ignored) with exactly these keys:
+{
+  "questId": "${q.id}",
+  "status": "completed | partial | blocked | failed",
+  "summary": "one paragraph",
+  "filesChanged": [{"path": "repo/relative/path.py", "change": "created | modified | deleted"}],
+  "commands": [{"command": "exact command", "result": "pass/fail counts, key output", "exitCode": 0}],
+  "tests": {"passed": 0, "failed": 0, "summary": "short summary"},
+  "acceptance": [
+${acc}
+  ],
+  "limitations": ["…"],
+  "decisions": ["… (say which need my approval)"],
+  "blockers": [],
+  "nextQuest": "Q…",
+  "cost": "none"
+}
+   Rules: one acceptance entry per criterion (index 0..${(q.acceptance || []).length - 1}); "completed" only if every criterion is met and no test failed; "blocked" needs at least one blocker; paths must be repository-relative.
+3. Run:  node questline/tools/ql.js submit .questline-reports/${q.id}.json
+   If it reports validation errors, fix the JSON and run it again.
+4. Reply with the same report in plain text. You cannot mark the quest Done: I review your report in Questline.
+
+Then STOP. Do not start another quest. Wait for my next instruction.`;
+  }
+
+  /* Ready-to-paste Claude Code instruction for one quest. opts.agent: the quest is assigned to
+     an Agent member, so the report is submitted through tools/ql.js. */
+  function buildPrompt(q, data, state, opts = {}) {
     const P = data.project; const byId = data._byId || indexById(data.quests);
     const adrById = indexById(data.adrs);
     const phase = data.phases.find((p) => p.id === q.phase);
@@ -284,6 +325,7 @@
       `## 7. Acceptance criteria (all must be met)\n${bullets(q.acceptance)}\n\nDefinition of done:\n${bullets(standardDoD(q))}`,
       `## 8. Restrictions\n${bullets(P.restrictions)}`,
       (st.notes || st.blockers ? `## Notes from earlier work on this quest\n${st.notes || ""}${st.blockers ? "\nRecorded blockers: " + st.blockers : ""}` : null),
+      opts.agent ? agentReportSection(q) :
       `## 9. Required completion report\nWhen finished, reply with exactly these sections:\n1. Summary: one paragraph.\n2. Files changed: path, created/modified, one line each.\n3. Commands run: each exact command with its result (pass/fail counts, key numbers).\n4. Acceptance criteria: each one marked MET or NOT MET with evidence.\n5. Actual results and measurements.\n6. Known limitations.\n7. Decisions made, and any decision that needs my approval.\n8. Follow-up tasks.\n9. Cost incurred (expected: none).\n\nThen STOP. Do not start another quest. Wait for my next instruction.`
     ].filter(Boolean);
     return sections.join("\n\n");
@@ -401,12 +443,155 @@
   function memberRoles(team) {
     return Object.fromEntries(((team && team.members) || []).map((m) => [m.id, m.role]));
   }
+  /* ───────── completion rules (one place, used by the UI, the merge and the CLI) ───────── */
+
+  const parseJSON = (s) => { try { return s ? JSON.parse(s) : null; } catch (e) { return null; } };
+  /* The agent's latest report, and whether the owner accepted that exact submission. */
+  function agentReportOf(rec) {
+    const report = parseJSON(((rec || {}).fields || {}).agentReport);
+    const review = parseJSON(((rec || {}).fields || {}).reportReview);
+    const current = !!(report && review && review.submittedAt === report.submittedAt);
+    return { report, review: current ? review : null, accepted: current && review.decision === "accepted" };
+  }
+  /* The conditions for Done, each with ok/label. Done is valid only if all are ok. */
+  function completionChecks(q, data, state) {
+    const byId = data._byId || indexById(data.quests);
+    const rec = qState(state, q.id); const f = rec.fields || {};
+    const unmet = (q.deps || []).filter((d) => !byId[d] || questStatus(byId[d], state) !== "done");
+    const acc = q.acceptance || [];
+    const unticked = acc.map((_, i) => i).filter((i) => !(rec.ack && rec.ack[i]));
+    const hasReport = ["report", "actual", "testResults"].some((k) => (f[k] || "").trim()) || !!q.actual || agentReportOf(rec).accepted;
+    return [
+      { key: "deps", ok: !unmet.length, label: unmet.length ? `Dependencies not done: ${unmet.join(", ")}` : "All dependencies are done" },
+      { key: "ack", ok: !unticked.length, label: unticked.length ? `Acceptance criteria not ticked: ${unticked.map((i) => i + 1).join(", ")} of ${acc.length}` : "All acceptance criteria are ticked" },
+      { key: "report", ok: hasReport, label: hasReport ? "Completion report recorded" : "No completion report recorded (or Claude's report not yet accepted)" },
+      { key: "external", ok: !q.external || !!rec.externalCleared, label: !q.external || rec.externalCleared ? "External dependency resolved" : "External dependency not resolved" }
+    ];
+  }
+  const completionProblems = (q, data, state) => completionChecks(q, data, state).filter((c) => !c.ok).map((c) => c.label);
+  /* A Done that fails the checks becomes In progress, with the reasons kept on the record.
+     Runs in dependency order so a refused quest also refuses Done on what depends on it.
+     Deterministic: the same inputs always give the same result (no clock reads). */
+  function enforceCompletion(state, data) {
+    const byId = data._byId || indexById(data.quests);
+    const refused = [];
+    for (const id of topoOrder(data.quests)) {
+      const rec = state.quests[id];
+      if (!rec || rec.status !== "done") continue;
+      const reasons = completionProblems(byId[id], data, state);
+      if (!reasons.length) { delete rec._rejected; continue; }
+      rec.status = "in_progress";
+      rec._rejected = { at: (rec._t || {}).status || "", by: (rec._b || {}).status || "", reasons };
+      refused.push({ id, reasons });
+    }
+    return refused;
+  }
+
+  /* ───────── agent report validation (used by tools/ql.js before anything is written) ───────── */
+
+  const REPORT_STATUSES = ["completed", "partial", "blocked", "failed"];
+  const REPORT_KEYS = ["questId", "status", "summary", "filesChanged", "commands", "tests", "acceptance",
+    "limitations", "decisions", "blockers", "nextQuest", "cost"];
+  /* Repository-relative path, normalized to forward slashes; null if absolute or escaping the repo. */
+  function repoRelativePath(p) {
+    if (typeof p !== "string" || !p.trim() || p.length > 260 || /[\x00-\x1f]/.test(p)) return null;
+    let s = p.trim().replace(/\\/g, "/");
+    if (/^[a-zA-Z]:/.test(s) || s.startsWith("/") || s.includes("//") || s.startsWith("~")) return null;
+    while (s.startsWith("./")) s = s.slice(2);
+    const parts = s.split("/");
+    if (!s || parts.some((x) => x === ".." || x === "." || x === "") || parts[0] === ".git") return null;
+    return s;
+  }
+  /* Returns {errors, report}; report is the normalized copy to store. Never executes anything. */
+  function validateAgentReport(raw, q, data) {
+    const errors = [];
+    const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
+    const str = (v, max, name, required = true) => {
+      if (v === undefined && !required) return undefined;
+      if (typeof v !== "string" || (required && !v.trim())) { errors.push(`${name} must be a non-empty string`); return undefined; }
+      if (v.length > max) { errors.push(`${name} is longer than ${max} characters`); return undefined; }
+      return v;
+    };
+    const strList = (v, name) => {
+      if (v === undefined) return [];
+      if (!Array.isArray(v) || v.length > 50) { errors.push(`${name} must be a list of at most 50 strings`); return []; }
+      return v.map((x, i) => str(x, 1000, `${name}[${i}]`)).filter((x) => x !== undefined);
+    };
+    const int = (v, name) => (Number.isInteger(v) && v >= 0 && v <= 1e6 ? v : (errors.push(`${name} must be a whole number ≥ 0`), 0));
+    if (!isObj(raw)) return { errors: ["The report must be a JSON object"], report: null };
+    for (const k of Object.keys(raw)) if (!REPORT_KEYS.includes(k)) errors.push(`Unknown key: ${k}`);
+    if (raw.questId !== q.id) errors.push(`questId must be "${q.id}"`);
+    if (!REPORT_STATUSES.includes(raw.status)) errors.push(`status must be one of: ${REPORT_STATUSES.join(", ")}`);
+    const summary = str(raw.summary, 4000, "summary");
+    const filesChanged = [];
+    if (!Array.isArray(raw.filesChanged) || raw.filesChanged.length > 200) errors.push("filesChanged must be a list (at most 200)");
+    else raw.filesChanged.forEach((f, i) => {
+      const p = isObj(f) ? repoRelativePath(f.path) : null;
+      if (!p) errors.push(`filesChanged[${i}].path must be a repository-relative path (no drive letter, leading slash or '..')`);
+      if (!isObj(f) || !["created", "modified", "deleted"].includes(f.change)) errors.push(`filesChanged[${i}].change must be created, modified or deleted`);
+      if (p && isObj(f)) filesChanged.push({ path: p, change: f.change });
+    });
+    const commands = [];
+    if (!Array.isArray(raw.commands) || raw.commands.length > 100) errors.push("commands must be a list (at most 100)");
+    else raw.commands.forEach((c, i) => {
+      if (!isObj(c)) { errors.push(`commands[${i}] must be an object`); return; }
+      const command = str(c.command, 1000, `commands[${i}].command`);
+      const result = str(c.result, 4000, `commands[${i}].result`, false);
+      if (c.exitCode !== undefined && !Number.isInteger(c.exitCode)) errors.push(`commands[${i}].exitCode must be an integer`);
+      if (command !== undefined) commands.push({ command, ...(result !== undefined ? { result } : {}), ...(Number.isInteger(c.exitCode) ? { exitCode: c.exitCode } : {}) });
+    });
+    let tests = { passed: 0, failed: 0 };
+    if (!isObj(raw.tests)) errors.push("tests must be an object {passed, failed, summary}");
+    else {
+      tests = { passed: int(raw.tests.passed, "tests.passed"), failed: int(raw.tests.failed, "tests.failed") };
+      const s = str(raw.tests.summary, 4000, "tests.summary", false);
+      if (s !== undefined) tests.summary = s;
+    }
+    const n = (q.acceptance || []).length;
+    const acceptance = [];
+    if (!Array.isArray(raw.acceptance) || raw.acceptance.length !== n) errors.push(`acceptance must have exactly ${n} entries, one per criterion`);
+    else {
+      const seen = new Set();
+      raw.acceptance.forEach((a, i) => {
+        if (!isObj(a) || !Number.isInteger(a.index) || a.index < 0 || a.index >= n || seen.has(a.index)) { errors.push(`acceptance[${i}].index must be a unique number from 0 to ${n - 1}`); return; }
+        seen.add(a.index);
+        if (typeof a.met !== "boolean") errors.push(`acceptance[${i}].met must be true or false`);
+        const evidence = str(a.evidence, 2000, `acceptance[${i}].evidence`);
+        acceptance.push({ index: a.index, met: a.met === true, evidence: evidence || "" });
+      });
+      acceptance.sort((a, b) => a.index - b.index);
+    }
+    const limitations = strList(raw.limitations, "limitations");
+    const decisions = strList(raw.decisions, "decisions");
+    const blockers = strList(raw.blockers, "blockers");
+    if (raw.nextQuest !== undefined && !(data._byId || indexById(data.quests))[raw.nextQuest]) errors.push(`nextQuest ${raw.nextQuest} is not a quest`);
+    const cost = str(raw.cost, 200, "cost", false);
+    if (raw.status === "completed" && (acceptance.some((a) => !a.met) || tests.failed > 0)) errors.push('status "completed" needs every criterion met and no failed tests (use "partial" or "failed")');
+    if (raw.status === "blocked" && !blockers.length) errors.push('status "blocked" needs at least one entry in blockers');
+    if (errors.length) return { errors, report: null };
+    return { errors, report: { questId: q.id, status: raw.status, summary, filesChanged, commands, tests, acceptance,
+      limitations, decisions, blockers, ...(raw.nextQuest ? { nextQuest: raw.nextQuest } : {}), ...(cost ? { cost } : {}) } };
+  }
+  /* Why an agent may not work on / report a quest right now ([] = allowed). */
+  function agentQuestProblems(q, agentId, data, state) {
+    const p = [];
+    if (assigneeOf(q, state) !== agentId) p.push(`${q.id} is not assigned to ${agentId}. In Questline, set "Assigned to" to the agent first.`);
+    if (questStatus(q, state) === "done") p.push(`${q.id} is already Done.`);
+    const unmet = unmetDeps(q, data, state);
+    if (unmet.length) p.push(`Dependencies not done: ${unmet.join(", ")}.`);
+    if (q.external && !qState(state, q.id).externalCleared) p.push(`External dependency not resolved: ${q.external}`);
+    return p;
+  }
+
   /* Merge every member's state file. Per field, the latest stamp wins.
      Permissions are enforced here, so a hand-edited file cannot bypass them:
        owner       → everything
-       contributor → only quests assigned to them (never the assignee itself)
-       viewer / unknown members → ignored */
-  function mergeStates(entries, team) {
+       contributor → only quests assigned to them (never the assignment or the agent/review fields)
+       agent       → only quests assigned to it: its report, and status In progress / Blocked
+                     (never Done, never ticks, never over a Done quest)
+       viewer / unknown members → ignored
+     With `data`, Done is then checked centrally (enforceCompletion) for everyone. */
+  function mergeStates(entries, team, data) {
     const roles = memberRoles(team);
     const out = emptyState();
     const clone = (v) => (v && typeof v === "object" ? JSON.parse(JSON.stringify(v)) : v);
@@ -428,28 +613,40 @@
       target.history = target.history.slice(-200);
     };
     const blank = (kind) => (kind === "quest" ? { fields: {}, ack: {}, history: [] } : kind === "adr" ? { history: [] } : { state: "unverified", note: "" });
-    const apply = (section, kind, src, allowKey) => {
+    const apply = (section, kind, src, allowKey, historyFilter) => {
       for (const [id, rec] of Object.entries(src[section] || {})) {
-        const keys = keysOf(rec, kind).filter((k) => allowKey(id, k));
-        if (!keys.length) continue;
+        const keys = keysOf(rec, kind).filter((k) => allowKey(id, k, rec));
+        const history = (rec.history || []).filter((h) => !historyFilter || historyFilter(id, h));
+        if (!keys.length && !history.length) continue;
         const target = (out[section][id] = out[section][id] || blank(kind));
         for (const k of keys) take(target, rec, k);
-        if (kind !== "assumption") mergeHistory(target, rec);
+        if (kind !== "assumption") mergeHistory(target, { history });
       }
     };
     const owners = entries.filter((e) => roles[e.user] === "owner");
     const contributors = entries.filter((e) => roles[e.user] === "contributor");
+    const agents = entries.filter((e) => roles[e.user] === "agent");
+    const assignedTo = (id, user) => !!(out.quests[id] && out.quests[id].assignee === user);
     for (const e of owners) {
       apply("quests", "quest", e.state, () => true);
       apply("adrs", "adr", e.state, () => true);
       apply("assumptions", "assumption", e.state, () => true);
     }
-    // Assignments are final after the owners' pass: contributors can never change them.
+    // Assignments are final after the owners' pass: contributors and agents can never change them.
     for (const e of contributors) {
-      apply("quests", "quest", e.state, (id, k) => k !== "assignee" && out.quests[id] && out.quests[id].assignee === e.user);
+      apply("quests", "quest", e.state,
+        (id, k) => assignedTo(id, e.user) && k !== "assignee" && !OWNER_ONLY_FIELDS.includes(k),
+        (id, h) => assignedTo(id, e.user) && h.by === e.user);
+    }
+    for (const e of agents) {
+      apply("quests", "quest", e.state,
+        (id, k, rec) => assignedTo(id, e.user) && (k === "f.agentReport" ||
+          (k === "status" && AGENT_STATUSES.includes(rec.status) && out.quests[id].status !== "done")),
+        (id, h) => assignedTo(id, e.user) && h.by === e.user && AGENT_STATUSES.includes(h.to));
     }
     const times = entries.map((e) => e.state.updatedAt).filter(Boolean).sort();
     out.updatedAt = times.length ? times[times.length - 1] : null;
+    if (data) enforceCompletion(out, data);
     return out;
   }
   /* session: {mode: 'local'|'desktop'|'viewer', user, role} */
@@ -483,7 +680,9 @@
     emptyState, validateState, questStatus, adrStatus, assumptionState, derivedStatus, unmetDeps, dependents,
     topoOrder, waves, criticalPath, nextAvailable, progress, currentPhase, milestoneStatus, filterQuests,
     search, buildPrompt, standardDoD, toMarkdown, integrityErrors, prepare, indexById,
-    stamp, restamp, mergeStates, canEditQuest, canEditProject, assigneeOf, recentActivity, keysOf
+    stamp, restamp, mergeStates, canEditQuest, canEditProject, assigneeOf, recentActivity, keysOf,
+    AGENT_STATUSES, completionChecks, completionProblems, enforceCompletion, agentReportOf, parseJSON,
+    validateAgentReport, agentQuestProblems, repoRelativePath, REPORT_STATUSES
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.QuestlineLogic = api;
