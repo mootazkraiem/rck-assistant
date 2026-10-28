@@ -23,6 +23,17 @@
       "with Ollama, store reviewed answers in an answer database, and serve validated answers on a reliable question match " +
       "without model inference; otherwise apply a configurable fallback policy. Development is local-first with synthetic data. " +
       "The local RCK copy in C:\\Users\\benkr\\Projects\\RBC is NOT the latest company version and must not be modified by assistant quests.",
+    /* How exported Claude reports reach the work PC. Undecided until the owner confirms a
+       company-approved channel: set `channel` (e.g. "Company OneDrive folder X") once it is. */
+    reportTransfer: {
+      channel: null,
+      requirements: [
+        "A channel your company approves for moving work files to the work PC; not the public GitHub repository.",
+        "Moves the single .qlreport.json file unchanged (reports can mention internal details).",
+        "Never carries progress files, the team file or Questline settings.",
+        "The work PC imports it through Questline (quest page → Import Claude's report), which revalidates it."
+      ]
+    },
     restrictions: [
       "Inspect the existing files relevant to this quest before changing anything.",
       "Preserve useful existing work; do not delete or rewrite working code without stating why.",

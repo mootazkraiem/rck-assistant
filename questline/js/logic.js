@@ -572,6 +572,51 @@ Then STOP. Do not start another quest. Wait for my next instruction.`;
     return { errors, report: { questId: q.id, status: raw.status, summary, filesChanged, commands, tests, acceptance,
       limitations, decisions, blockers, ...(raw.nextQuest ? { nextQuest: raw.nextQuest } : {}), ...(cost ? { cost } : {}) } };
   }
+  /* ───────── moving a report between separate workspaces (personal → work) ─────────
+     Only a report travels, never progress, team or settings. The receiving workspace
+     revalidates everything against its OWN state: schema, assignment, dependencies,
+     external gate, duplicates. Import never marks Done or ticks criteria. */
+  const EXPORT_KIND = "questline-agent-report";
+  const EXPORT_KEYS = ["kind", "version", "questId", "submittedAt", "agent", "exportedAt", "report"];
+  const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+  /* The package `ql export` writes, from a report already stored in the source workspace. */
+  function makeExportEnvelope(stored, exportedAt) {
+    const report = {};
+    for (const k of REPORT_KEYS) if (stored[k] !== undefined) report[k] = stored[k];
+    return { kind: EXPORT_KIND, version: 1, questId: stored.questId, submittedAt: stored.submittedAt, agent: stored.agent, exportedAt, report };
+  }
+  /* Validate an imported package for quest q in THIS workspace.
+     Returns {errors, stored, agentId}; `stored` goes into fields.agentReport. */
+  function prepareImport(envelope, q, data, state, team, importer, now) {
+    const errors = [];
+    const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
+    if (!isObj(envelope)) return { errors: ["The file is not a Questline report package"], stored: null };
+    for (const k of Object.keys(envelope)) if (!EXPORT_KEYS.includes(k)) errors.push(`Unexpected field in the package: ${k} (only the report can be imported)`);
+    if (envelope.kind !== EXPORT_KIND || envelope.version !== 1) errors.push("Not a Questline report package (kind/version)");
+    if (envelope.questId !== q.id) errors.push(`This package is for ${envelope.questId}, not ${q.id}`);
+    const ts = (v) => typeof v === "string" && ISO_RE.test(v) && !isNaN(Date.parse(v));
+    if (!ts(envelope.submittedAt)) errors.push("submittedAt is missing or not a UTC timestamp");
+    else if (Date.parse(envelope.submittedAt) > Date.parse(now) + 5 * 60 * 1000) errors.push("submittedAt is in the future");
+    if (envelope.exportedAt !== undefined && !ts(envelope.exportedAt)) errors.push("exportedAt is not a UTC timestamp");
+    if (typeof envelope.agent !== "string" || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(envelope.agent)) errors.push("agent is missing or invalid");
+    const { errors: reportErrors, report } = validateAgentReport(envelope.report, q, data);
+    errors.push(...reportErrors.map((e) => `Report: ${e}`));
+    // Assignment, dependencies, Done and external gate: this workspace's own state decides.
+    const assignee = assigneeOf(q, state);
+    const role = Object.fromEntries(((team && team.members) || []).map((m) => [m.id, m.role]))[assignee];
+    if (role !== "agent") errors.push(`${q.id} is not assigned to an Agent in this workspace${assignee ? ` (assigned to ${assignee})` : ""}. Assign it to Claude first.`);
+    else errors.push(...agentQuestProblems(q, assignee, data, state).filter((p) => !/not assigned/.test(p)));
+    // Duplicates and out-of-date packages.
+    const current = agentReportOf(qState(state, q.id)).report;
+    const prev = current && current.source && current.source.submittedAt;
+    if (prev && envelope.submittedAt === prev) errors.push("This report was already imported.");
+    else if (prev && ts(envelope.submittedAt) && Date.parse(envelope.submittedAt) < Date.parse(prev)) errors.push("This report is older than the one already imported.");
+    if (errors.length) return { errors, stored: null };
+    return { errors, agentId: assignee, stored: { ...report, submittedAt: now, agent: assignee,
+      source: { submittedAt: envelope.submittedAt, agent: envelope.agent, ...(envelope.exportedAt ? { exportedAt: envelope.exportedAt } : {}) },
+      imported: { by: importer || "owner", at: now } } };
+  }
+
   /* Why an agent may not work on / report a quest right now ([] = allowed). */
   function agentQuestProblems(q, agentId, data, state) {
     const p = [];
@@ -682,7 +727,8 @@ Then STOP. Do not start another quest. Wait for my next instruction.`;
     search, buildPrompt, standardDoD, toMarkdown, integrityErrors, prepare, indexById,
     stamp, restamp, mergeStates, canEditQuest, canEditProject, assigneeOf, recentActivity, keysOf,
     AGENT_STATUSES, completionChecks, completionProblems, enforceCompletion, agentReportOf, parseJSON,
-    validateAgentReport, agentQuestProblems, repoRelativePath, REPORT_STATUSES
+    validateAgentReport, agentQuestProblems, repoRelativePath, REPORT_STATUSES,
+    EXPORT_KIND, makeExportEnvelope, prepareImport
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.QuestlineLogic = api;

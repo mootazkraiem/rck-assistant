@@ -4,6 +4,8 @@
      node questline/tools/ql.js list                 quests assigned to the agent
      node questline/tools/ql.js show <quest-id>      print the quest prompt (refuses if not workable)
      node questline/tools/ql.js submit <report.json> validate and record a completion report
+     node questline/tools/ql.js export <quest-id>    package the submitted report for another
+                                                     workspace (report only; --out <file.json>)
 
    What it can write: ONLY <shared folder>/progress/<agent-id>.js, the agent's own file, by
    atomic replace. Never the owner's or anyone else's file, never the team file.
@@ -169,17 +171,42 @@ function cmdSubmit(file, opts, out) {
   return 0;
 }
 
+/* Package the agent's submitted report for another workspace (e.g. personal PC → work PC).
+   Contains ONLY the report: no progress, team or settings. The receiving Questline
+   revalidates everything against its own state ("Import Claude's report"). */
+function cmdExport(id, opts, out) {
+  const { dir, agent, data, state } = context(opts);
+  const q = questOrFail(data, id);
+  const { report: stored } = L.agentReportOf(state.quests[q.id]);
+  if (!stored || stored.agent !== agent.id) throw new QlError(`No report from ${agent.id} for ${q.id}. Run "ql submit" first.`);
+  const { errors } = L.validateAgentReport(L.makeExportEnvelope(stored, "").report, q, data);
+  if (errors.length) throw new QlError(`The stored report is not valid:\n- ${errors.join("\n- ")}`);
+  const stamp = new Date().toISOString();
+  const target = path.resolve(opts.out || path.join(".questline-reports", "export", `${q.id}-${stamp.replace(/[-:]/g, "").slice(0, 15)}.qlreport.json`));
+  if (!target.toLowerCase().endsWith(".json")) throw new QlError("--out must be a .json file");
+  const rel = path.relative(path.resolve(dir), target);
+  if (!rel.startsWith("..") && !path.isAbsolute(rel)) throw new QlError("Refusing to write the package inside the Questline shared folder.");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, JSON.stringify(L.makeExportEnvelope(stored, stamp), null, 2), { encoding: "utf8", flag: "wx" });
+  out(`Exported ${q.id} (submitted ${stored.submittedAt}) to ${target}`);
+  out("Transfer it only through a channel your company approves (not the public git repo). On the work PC: quest page → Import Claude's report.");
+  return 0;
+}
+
 function main(argv, out = console.log, err = console.error) {
   const args = argv.slice();
   const opts = {};
-  const ai = args.indexOf("--agent");
-  if (ai >= 0) { opts.agent = args[ai + 1]; args.splice(ai, 2); }
+  for (const flag of ["--agent", "--out"]) {
+    const i = args.indexOf(flag);
+    if (i >= 0) { opts[flag.slice(2)] = args[i + 1]; args.splice(i, 2); }
+  }
   const [cmd, arg] = args;
   try {
     if (cmd === "list") return cmdList(opts, out);
     if (cmd === "show") return cmdShow(arg, opts, out);
     if (cmd === "submit") return cmdSubmit(arg, opts, out);
-    err("Usage: node questline/tools/ql.js list | show <quest-id> | submit <report.json> [--agent <id>]");
+    if (cmd === "export") return cmdExport(arg, opts, out);
+    err("Usage: node questline/tools/ql.js list | show <quest-id> | submit <report.json> | export <quest-id> [--out <file.json>] [--agent <id>]");
     return 2;
   } catch (e) {
     err(`ql: ${e instanceof QlError ? e.message : (e && e.stack) || e}`);

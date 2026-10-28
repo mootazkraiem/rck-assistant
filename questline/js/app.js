@@ -332,6 +332,7 @@ window.QuestlineStart = function (store, initialState) {
     ${d === "locked" ? `<div class="callout">Waiting on: ${L.unmetDeps(q, D, state).map(qLink).join(" ")}. You can still prepare it, but finish its dependencies first.</div>` : ""}
     ${s._rejected ? `<div class="callout bad"><strong>A "Done" was refused</strong>${s._rejected.by ? ` (set by ${esc(memberName(s._rejected.by))}${s._rejected.at ? " on " + esc(fmtDate(s._rejected.at)) : ""})` : ""}. The quest stays In progress until these are fixed:${list(s._rejected.reasons)}</div>` : ""}
     ${agentPanel(q, s)}
+    ${importBar(q)}
     <div class="card">
       <div class="btn-row" style="justify-content:space-between;margin-bottom:14px">
         <div class="seg" role="group" aria-label="Quest status">${statusBtns}</div>
@@ -363,6 +364,44 @@ window.QuestlineStart = function (store, initialState) {
       <h3>Potential failures and troubleshooting</h3>
       ${(q.failures || []).length ? `<table><tr><th>If this happens</th><th>Do this</th></tr>${q.failures.map((f) => `<tr><td><strong>${rich(f[0])}</strong></td><td class="secondary">${rich(f[1])}</td></tr>`).join("")}</table>` : '<p class="muted">None identified.</p>'}`;
   }
+  /* Owner-only: bring in a report exported from another workspace (`ql export`). Only the
+     report is read from the file; it is revalidated against THIS workspace (L.prepareImport). */
+  const transfer = () => D.project.reportTransfer || { channel: null, requirements: [] };
+  function importBar(q) {
+    if (!canP() || readOnly || !agentIds().length) return "";
+    const ch = transfer().channel;
+    return `<div class="btn-row small" style="margin:-6px 0 14px">
+      <label class="btn sm" title="A .qlreport.json made with: node questline/tools/ql.js export ${esc(q.id)}">Import Claude's report…
+        <input type="file" id="importReport" data-id="${esc(q.id)}" accept=".json,application/json" hidden></label>
+      <span class="muted">${ch ? `Approved transfer channel: ${esc(ch)}` : "Transfer channel not decided yet (see README → Moving reports between workspaces)."}</span></div>`;
+  }
+  function importReport(id, text) {
+    const q = qById[id];
+    let env;
+    try { env = JSON.parse(text.replace(/^﻿/, "")); }
+    catch (e) { modal("Import refused", "<p>The file is not valid JSON.</p>", [{ label: "OK" }]); return; }
+    const now = new Date().toISOString();
+    const res = L.prepareImport(env, q, D, state, session.team, me, now);
+    if (res.errors.length) {
+      modal(`Import refused for ${id}`, `<p>Nothing was imported. Checked against this workspace:</p>${list(res.errors)}`, [{ label: "OK", cls: "primary" }]);
+      return;
+    }
+    const r = res.stored; const met = r.acceptance.filter((a) => a.met).length;
+    const ch = transfer().channel;
+    modal(`Import Claude's report for ${id}?`,
+      `<p><strong>${esc(r.summary)}</strong></p><ul><li>Reported status: <strong>${esc(r.status)}</strong>; criteria met: ${met}/${r.acceptance.length}; tests: ${r.tests.passed} passed, ${r.tests.failed} failed</li>
+       <li>Submitted in the other workspace on ${esc(fmtDate(r.source.submittedAt))} by ${esc(r.source.agent)}</li></ul>
+       <p class="small secondary">Only this report is imported: no progress, team or settings. It appears as <strong>Awaiting review</strong>; nothing is ticked or marked Done until you accept and click Done.</p>
+       ${ch ? "" : `<p class="small" style="color:var(--warn)">No transfer channel is approved yet: make sure this file reached the work PC through a channel your company permits.</p>`}`,
+      [{ label: "Cancel" }, { label: "Import", cls: "primary", run: () => {
+        const s = qs(id);
+        s.fields.agentReport = JSON.stringify(r); touch(s, "f.agentReport");
+        const to = r.status === "blocked" ? "blocked" : "in_progress";
+        if (L.questStatus(q, state) !== to) recordStatus(id, to); else save();
+        render(true); toast(`Report imported for ${id}: review it below.`);
+      } }]);
+  }
+
   /* Claude's report (written by tools/ql.js into the agent's own file) and the owner's review.
      Everything is shown as text: nothing in a report is ever executed. */
   function agentPanel(q, s) {
@@ -376,7 +415,9 @@ window.QuestlineStart = function (store, initialState) {
     return `<div class="card agent-report">
       <div class="btn-row" style="justify-content:space-between">
         <h2 style="margin:0">Claude's report: ${pill(state_[0], state_[1])}</h2>
-        <span class="small secondary">Submitted ${esc(fmtDate(r.submittedAt))}${r.agent ? " by " + esc(memberName(r.agent)) : ""} · reported status: <strong>${esc(r.status)}</strong></span>
+        <span class="small secondary">${r.imported
+          ? `Imported by ${esc(memberName(r.imported.by))} on ${esc(fmtDate(r.imported.at))} · submitted in the other workspace on ${esc(fmtDate(r.source.submittedAt))}`
+          : `Submitted ${esc(fmtDate(r.submittedAt))}${r.agent ? " by " + esc(memberName(r.agent)) : ""}`} · reported status: <strong>${esc(r.status)}</strong></span>
       </div>
       ${review && !accepted ? `<div class="callout bad"><strong>Rejected</strong> by ${esc(memberName(review.by))} on ${esc(fmtDate(review.at))}${review.note ? `: ${esc(review.note)}` : ""}. Claude can resubmit.</div>` : ""}
       ${accepted ? `<div class="callout ok"><strong>Accepted</strong> by ${esc(memberName(review.by))} on ${esc(fmtDate(review.at))}. Check the ticks on the Validation tab, then click <strong>Done</strong>.</div>` : ""}
@@ -852,6 +893,13 @@ window.QuestlineStart = function (store, initialState) {
       const file = el.files[0]; const reader = new FileReader();
       reader.onload = () => importState(String(reader.result), file.name); reader.readAsText(file);
       el.value = "";
+    }
+    else if (el.id === "importReport" && el.files[0]) {
+      const file = el.files[0]; const id = el.dataset.id; el.value = "";
+      if (!canP()) return;
+      if (file.size > 256 * 1024) { modal("Import refused", "<p>The file is larger than 256 KB: not a Questline report package.</p>", [{ label: "OK" }]); return; }
+      const reader = new FileReader();
+      reader.onload = () => importReport(id, String(reader.result)); reader.readAsText(file);
     }
   });
   let typingTimer = null;

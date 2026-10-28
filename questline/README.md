@@ -223,7 +223,60 @@ your PC from editing files. The real limits are:
 - **The merge rules and your review** are the second layer. Anything written as the
   agent is limited as described above, and nothing becomes Done without you.
 
+## Two workspaces: personal (Claude) and work (team)
+
+The two Questline workspaces are **completely separate** and share no files:
+
+| | Work workspace | Personal workspace |
+|---|---|---|
+| Folder | The team's shared folder on the work network | A local folder on the personal PC |
+| Members | Owner, contributor, PM (viewer), and Claude as Agent (for imports) | Owner, Claude (Agent) |
+| Role | **The official progress** | Claude runs RCK AI Assistant quests here |
+
+**Only reports move between them, one quest at a time:**
+1. **Personal PC:** Claude runs the quest, then `ql submit`. You review it locally if you
+   like.
+2. **Personal PC:** export the report:
+   ```powershell
+   node questline/tools/ql.js export Q1.5 --out <file>.qlreport.json
+   ```
+   The package holds only the report: no progress, team or settings. Its default location
+   is `.questline-reports\export\`, which git ignores. It never overwrites an existing
+   file, and it refuses to write inside the shared folder.
+3. **Transfer the file** through the approved channel (below).
+4. **Work PC (owner):**
+   1. Open the quest, set **Assigned to = Claude**, then click **Import Claude's report…**
+      and pick the file.
+   2. It is **revalidated against the work workspace**: the package format with exact
+      keys, so any extra field such as a forged `"status": "done"` or ticks is refused;
+      the full report checks; the quest assigned to an Agent there; dependencies done
+      there; not already Done; the external gate; duplicates and out-of-date packages.
+      Nothing is imported if any check fails.
+   3. If accepted, the report shows **Awaiting review**. Accept it (which ticks the
+      criteria it marked as met), then click **Done**: the work workspace's own Done
+      rules decide.
+5. **What import never does:** mark Done, tick criteria by itself, or read or write
+   progress files, the team file or settings. It only adds the report to the owner's own
+   record.
+
+### Transfer channel: not decided yet
+The channel is a company decision. Until it's made, `reportTransfer.channel` in
+`data/project.js` is `null`, and the import button says so. Requirements for whatever
+channel is chosen:
+- It is approved by your company for moving work files onto the work PC.
+- It is **not** the public GitHub repository, because reports can mention internal
+  details.
+- It moves the single `.qlreport.json` file unchanged.
+- It never carries progress files, the team file or Questline settings.
+
+Once a channel is approved, set `reportTransfer.channel` (for example
+`"Company OneDrive: <folder>"`), then rebuild the .exe. Questline takes the file from any
+location you pick, so the channel decision doesn't change the code.
+
 ## Moving the shared folder
+
+For a **personal** workspace only. Never use this to move or redirect the team's work
+shared folder.
 
 Close every Questline window first, then run:
 ```powershell
@@ -314,6 +367,13 @@ quest (P0–P6) that depends on GPU or RCK work. The second command regenerates
     temporary folders. 20/20 checks: assign, show, submit, awaiting review, Done refused,
     reject, resubmit, accept with ticks, Done, next quest unlocks, forged agent Done
     ignored.
+  - **Import tests (`tests/import.test.js`, 8):** valid import; invalid reports; wrong
+    assignment; dependencies checked on the work side; forged completion claims;
+    duplicate and out-of-date packages; `ql export` packaging.
+  - **`python questline\desktop\tests\e2e_import_flow.py`:** two separate temporary
+    workspaces. It runs personal submit and export, then work-side import in the real app
+    (hidden). 18/18 checks pass. This **simulates** the work workspace; it is not a test
+    on the real work PC.
 - `node --test` (25 tests): data integrity; the audit is the first quest; P0–P6 never
   depend on P7/P8; derived statuses; waves; the critical path; progress; filters; search;
   prompt contents; import validation; Markdown export.

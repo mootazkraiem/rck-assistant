@@ -13,3 +13,5 @@ questline/Open Questline.html
 
 # Claude Code agent reports before submission (tools/ql.js)
 .questline-reports/
+# Personal Claude Code permissions (contain local paths)
+.claude/settings.local.json
