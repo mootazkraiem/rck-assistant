@@ -9,6 +9,7 @@
     ],
     "allow": [
       "Bash(node questline/tools/ql.js list)",
+      "Bash(node questline/tools/ql.js read *)",
       "Bash(node questline/tools/ql.js show *)",
       "Bash(node questline/tools/ql.js submit *)",
       "Edit(/.questline-reports/**)"

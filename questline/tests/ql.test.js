@@ -172,6 +172,20 @@ test("--agent must name an Agent member, never the owner", () => {
   assert.equal(sha(ownerFile), before);
 });
 
+test("read shows any quest without assignment, writes nothing, and submit stays locked", () => {
+  const { root, shared } = setup();
+  const before = fs.readdirSync(path.join(shared, "progress")).map((f) => sha(path.join(shared, "progress", f)));
+  const r = run("read", "Q7.5");
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /READ-ONLY VIEW of Q7.5/);
+  assert.match(r.out, /assigned to nobody/);
+  assert.match(r.out, /cannot submit a report for it yet/);
+  assert.match(r.out, /Quest Q7.5/);
+  assert.deepEqual(fs.readdirSync(path.join(shared, "progress")).map((f) => sha(path.join(shared, "progress", f))), before);
+  assert.match(run("submit", writeReport(root, report("Q7.5"))).err, /not assigned to claude/);
+  assert.match(run("read", "Q99.1").err, /Unknown quest/);
+});
+
 test("missing setup gives a clear message", () => {
   process.env.QUESTLINE_CONFIG_DIR = path.join(os.tmpdir(), "ql-no-such-dir-" + process.pid);
   assert.match(run("list").err, /not set up on this PC/);

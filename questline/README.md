@@ -190,6 +190,10 @@ still decide:** Claude can never mark a quest Done or tick criteria.
    the completion report. **Reject report** asks for a reason, and Claude can resubmit.
 5. Check the ticks, then click **Done** yourself. The dependent quests unlock as usual.
 
+**Reading any quest:** `node questline/tools/ql.js read <id>` shows any quest's brief,
+status and blockers, whether or not it's assigned to Claude. It never writes anything.
+Working on a quest and submitting still need the assignment.
+
 **What the CLI enforces:**
 - `show` refuses quests that aren't assigned to the agent, are already Done, have
   unfinished dependencies, or have an unresolved external dependency.

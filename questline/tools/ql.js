@@ -2,6 +2,7 @@
 /* Questline CLI for Claude Code (the "Agent" team member). Requires Node.js 18+.
 
      node questline/tools/ql.js list                 quests assigned to the agent
+     node questline/tools/ql.js read <quest-id>      read ANY quest (read-only, no assignment needed)
      node questline/tools/ql.js show <quest-id>      print the quest prompt (refuses if not workable)
      node questline/tools/ql.js submit <report.json> validate and record a completion report
      node questline/tools/ql.js export <quest-id>    package the submitted report for another
@@ -171,6 +172,21 @@ function cmdSubmit(file, opts, out) {
   return 0;
 }
 
+/* Read-only view of ANY quest: no assignment needed, nothing written. Working on it and
+   submitting still require `show`/`submit` rules (assigned to the agent, dependencies done). */
+function cmdRead(id, opts, out) {
+  const { agent, data, state } = context(opts);
+  const q = questOrFail(data, id);
+  const assignee = L.assigneeOf(q, state);
+  const problems = L.agentQuestProblems(q, agent.id, data, state);
+  out(`READ-ONLY VIEW of ${q.id}: status ${L.STATUS_LABEL[L.derivedStatus(q, data, state)]}; assigned to ${assignee || "nobody"}.`);
+  out(problems.length
+    ? `You may read this quest, but you cannot submit a report for it yet:\n- ${problems.join("\n- ")}\n`
+    : `It is assigned to you and workable: run "ql show ${q.id}" to start.\n`);
+  out(L.buildPrompt(q, data, state, { agent: true }));
+  return 0;
+}
+
 /* Package the agent's submitted report for another workspace (e.g. personal PC → work PC).
    Contains ONLY the report: no progress, team or settings. The receiving Questline
    revalidates everything against its own state ("Import Claude's report"). */
@@ -204,9 +220,10 @@ function main(argv, out = console.log, err = console.error) {
   try {
     if (cmd === "list") return cmdList(opts, out);
     if (cmd === "show") return cmdShow(arg, opts, out);
+    if (cmd === "read") return cmdRead(arg, opts, out);
     if (cmd === "submit") return cmdSubmit(arg, opts, out);
     if (cmd === "export") return cmdExport(arg, opts, out);
-    err("Usage: node questline/tools/ql.js list | show <quest-id> | submit <report.json> | export <quest-id> [--out <file.json>] [--agent <id>]");
+    err("Usage: node questline/tools/ql.js list | read <quest-id> | show <quest-id> | submit <report.json> | export <quest-id> [--out <file.json>] [--agent <id>]");
     return 2;
   } catch (e) {
     err(`ql: ${e instanceof QlError ? e.message : (e && e.stack) || e}`);
